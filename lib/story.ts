@@ -2,19 +2,8 @@ export type Line = {
   /** seconds from chapter start */
   at: number;
   text: string;
-  /** render emphasized (italic serif, larger) */
+  /** render emphasized */
   em?: boolean;
-};
-
-export type World = {
-  /** sky gradient stops */
-  sky: [string, string];
-  /** floodlight position (percent) and color */
-  lightX: number;
-  lightY: number;
-  lightColor: string;
-  lightSize: number; // percent
-  fog: number; // 0..1
 };
 
 export type Ambience = {
@@ -30,11 +19,11 @@ export type Ambience = {
 export type Chapter = {
   id: string;
   year: string;
-  reel: string;
-  title: string;
+  edition: string;
+  /** the back-page headline for this chapter */
+  headline: string;
   duration: number; // seconds
   lines: Line[];
-  world: World;
   ambience: Ambience;
 };
 
@@ -47,17 +36,9 @@ export const chapters: Chapter[] = [
   {
     id: "yard",
     year: "1998",
-    reel: "Reel 01",
-    title: "The Yard",
+    edition: "Edition No. 1",
+    headline: "The Yard",
     duration: 21,
-    world: {
-      sky: ["#2b1f14", "#0b0a09"],
-      lightX: 78,
-      lightY: 18,
-      lightColor: "rgba(224, 164, 60, 0.34)",
-      lightSize: 62,
-      fog: 0.12,
-    },
     ambience: {
       noiseHz: 1400,
       noiseGain: 0.05,
@@ -78,17 +59,9 @@ export const chapters: Chapter[] = [
   {
     id: "fiveam",
     year: "2016",
-    reel: "Reel 02",
-    title: "5 A.M.",
+    edition: "Edition No. 2",
+    headline: "5 A.M.",
     duration: 20,
-    world: {
-      sky: ["#101720", "#07080a"],
-      lightX: 22,
-      lightY: 10,
-      lightColor: "rgba(150, 180, 214, 0.22)",
-      lightSize: 55,
-      fog: 0.3,
-    },
     ambience: {
       noiseHz: 700,
       noiseGain: 0.09,
@@ -109,17 +82,9 @@ export const chapters: Chapter[] = [
   {
     id: "sound",
     year: "2021",
-    reel: "Reel 03",
-    title: "The Sound",
+    edition: "Edition No. 3",
+    headline: "Moreau Out",
     duration: 19,
-    world: {
-      sky: ["#1a0e0e", "#060505"],
-      lightX: 50,
-      lightY: 30,
-      lightColor: "rgba(214, 92, 60, 0.2)",
-      lightSize: 44,
-      fog: 0.42,
-    },
     ambience: {
       noiseHz: 240,
       noiseGain: 0.06,
@@ -136,17 +101,9 @@ export const chapters: Chapter[] = [
   {
     id: "quiet",
     year: "2022",
-    reel: "Reel 04",
-    title: "The Quiet Year",
+    edition: "Edition No. 4",
+    headline: "The Quiet Year",
     duration: 24,
-    world: {
-      sky: ["#0e0e10", "#050506"],
-      lightX: 12,
-      lightY: 60,
-      lightColor: "rgba(180, 176, 168, 0.1)",
-      lightSize: 38,
-      fog: 0.55,
-    },
     ambience: {
       noiseHz: 160,
       noiseGain: 0.035,
@@ -171,17 +128,9 @@ export const chapters: Chapter[] = [
   {
     id: "back",
     year: "2024",
-    reel: "Reel 05",
-    title: "Back",
+    edition: "Edition No. 5",
+    headline: "He's Back",
     duration: 19,
-    world: {
-      sky: ["#1c2416", "#090a08"],
-      lightX: 60,
-      lightY: 8,
-      lightColor: "rgba(213, 224, 160, 0.26)",
-      lightSize: 70,
-      fog: 0.2,
-    },
     ambience: {
       noiseHz: 950,
       noiseGain: 0.11,
@@ -202,17 +151,9 @@ export const chapters: Chapter[] = [
   {
     id: "onemore",
     year: "2026",
-    reel: "Reel 06",
-    title: "One More Year",
+    edition: "Final Edition",
+    headline: "One More Year",
     duration: 27,
-    world: {
-      sky: ["#241a10", "#0b0a09"],
-      lightX: 50,
-      lightY: 14,
-      lightColor: "rgba(224, 164, 60, 0.4)",
-      lightSize: 78,
-      fog: 0.16,
-    },
     ambience: {
       noiseHz: 420,
       noiseGain: 0.05,
@@ -236,7 +177,7 @@ export const totalDuration = chapters.reduce((s, c) => s + c.duration, 0);
 export const chapterStart = (index: number) =>
   chapters.slice(0, index).reduce((s, c) => s + c.duration, 0);
 
-/** fragments "Danny" shared — used in the creation preview */
+/** fragments "Danny" shared — used in the scrapbook */
 export const sampleFragments = [
   { kind: "voice note", text: "my dad never came to a single match. i scored anyway.", meta: "0:41" },
   { kind: "photo", text: "a flat ball on concrete, two dustbins for posts", meta: "1998" },
@@ -248,12 +189,20 @@ export const sampleFragments = [
   },
 ];
 
-/** what the AI Director "does" during generation */
-export const directorSteps = [
-  "Reading fourteen fragments…",
-  "Finding the moment you almost quit…",
-  "Deciding where the silence goes…",
-  "Choosing a voice like rain on a tin roof…",
-  "Scoring the quiet year in a minor key…",
-  "Cutting the ending. Keeping the hope.",
+/** what the editor does to the wire copy, in order */
+export const editorSteps = [
+  "reading fourteen fragments…",
+  "finding the moment you almost quit…",
+  "cutting what a stranger would write…",
+  "keeping what only you would say…",
+  "deciding where the silence goes…",
+  "sending it to the voice desk.",
+];
+
+export const tickerItems = [
+  "MOREAU SAYS YES TO ONE MORE YEAR",
+  "FLAT BALL, BIG DREAMS — A YARD STORY",
+  "19 MONTHS: THE COMEBACK NOBODY PRINTED",
+  "SIXTY THOUSAND ON THEIR FEET FOR A SIX-YARD PASS",
+  "WHAT'S THE THING YOU CAN'T QUIT?",
 ];

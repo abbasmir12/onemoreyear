@@ -1,23 +1,28 @@
 import type { Metadata } from "next";
-import { Fraunces, Geist_Mono } from "next/font/google";
+import { Anton, IBM_Plex_Mono, Caveat } from "next/font/google";
 import "./globals.css";
 
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
+const anton = Anton({
+  variable: "--font-anton",
   subsets: ["latin"],
-  axes: ["opsz", "SOFT", "WONK"],
-  style: ["normal", "italic"],
+  weight: "400",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+});
+
+const caveat = Caveat({
+  variable: "--font-caveat",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "One More Year — a cinematic memory",
+  title: "One More Year — the back page of a life",
   description:
-    "Give us the fragments of something you love. Gemini finds the story. ElevenLabs gives it a voice. One More Year turns it into a living cinematic memory.",
+    "Give us the fragments of something you love. Gemini finds the story. ElevenLabs gives it a voice. One More Year prints the back page of your life.",
 };
 
 export default function RootLayout({
@@ -26,8 +31,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${geistMono.variable} antialiased`}>
-      <body className="grain">{children}</body>
+    <html
+      lang="en"
+      className={`${anton.variable} ${plexMono.variable} ${caveat.variable} antialiased`}
+    >
+      <body>{children}</body>
     </html>
   );
 }

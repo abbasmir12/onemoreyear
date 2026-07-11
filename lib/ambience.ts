@@ -90,6 +90,21 @@ export class AmbienceEngine {
     this.master!.gain.setTargetAtTime(1, this.ctx!.currentTime, 0.8);
   }
 
+  /** one teletype key-click */
+  tick() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = 1800 + Math.random() * 900;
+    g.gain.setValueAtTime(0.028, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+    osc.connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.035);
+  }
+
   pause() {
     if (!this.ctx || !this.master) return;
     this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.4);
