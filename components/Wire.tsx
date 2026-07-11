@@ -71,7 +71,6 @@ export default function Wire() {
       lastRef.current = now;
       setTime((t) => {
         const next = t + dt;
-        // in solo mode, stop at the edge of the current card
         if (modeRef.current === "solo") {
           const { chapterIdx: ci } = locate(t);
           const edge = chapterStart(ci) + chapters[ci].duration;
@@ -129,19 +128,18 @@ export default function Wire() {
 
   return (
     <section id="wire" className="cut-r relative bg-black pb-28 text-white">
-      {/* ——— the main image, low opacity, behind everything ——— */}
+      {/* the active moment's artwork, faint, behind everything */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-        {chapters.map((c, i) => (
+        {started && (
           <MomentArt
-            key={c.id}
-            id={c.id}
-            className="absolute inset-0 h-full w-full transition-opacity duration-1000"
-            style={{ opacity: (started ? i === chapterIdx : c.id === "onemore") ? 0.09 : 0 }}
+            key={chapter.id}
+            id={chapter.id}
+            className="absolute inset-0 h-full w-full opacity-[0.035] transition-opacity duration-1000"
           />
-        ))}
+        )}
       </div>
 
-      <div className="relative mx-auto max-w-7xl px-5 md:px-10">
+      <div className="relative mx-auto max-w-6xl px-5 md:px-10">
         <Reveal>
           <p className="text-xs font-bold uppercase tracking-[0.3em]">
             Step three — tonight&rsquo;s back page
@@ -150,7 +148,8 @@ export default function Wire() {
             <span className="slam">{STORY_SUBJECT}</span>
           </h2>
           <p className="mt-6 max-w-lg text-sm leading-relaxed text-white/80">{STORY_LOGLINE}</p>
-          <div className="mt-6 flex flex-wrap items-center gap-4">
+
+          <div className="mt-8 flex flex-wrap items-center gap-4">
             <button
               onClick={playing && mode === "wire" ? hold : runWire}
               className="display border-4 border-white px-8 py-3 text-3xl transition-colors hover:bg-white hover:text-black"
@@ -166,145 +165,119 @@ export default function Wire() {
             >
               ⛶ Watch it as a film
             </button>
-            <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-white/50">
-              {fmt(totalDuration)} · six moments · or play any card alone
-              <br />
-              sound on — room tone synthesized live, standing in for the elevenlabs score
-            </p>
           </div>
+          <p className="mt-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-white/50">
+            {fmt(totalDuration)} · sound on · or click any moment to play it alone
+          </p>
         </Reveal>
 
-        {/* ——— master timeline ——— */}
+        {/* master timeline — the only place with slot times */}
         <Reveal delay={120}>
-          <div className="relative mt-10 border-4 border-white">
-            <div className="flex">
+          <div className="relative mt-12 overflow-hidden border-2 border-white/60">
+            {/* played portion */}
+            <div
+              aria-hidden
+              className="absolute inset-y-0 left-0 bg-white/20 transition-[width] duration-300"
+              style={{ width: `${progress * 100}%` }}
+            />
+            <div className="relative flex">
               {chapters.map((c, i) => (
                 <button
                   key={c.id}
                   onClick={() => playCard(i, false)}
-                  data-active={started && i === chapterIdx}
-                  className="edition group relative border-0 py-3 text-[0.6rem] font-bold tracking-widest"
+                  className={`py-2.5 text-[0.6rem] font-bold tracking-widest transition-colors hover:bg-white hover:text-black ${
+                    started && i === chapterIdx
+                      ? "text-white underline underline-offset-4"
+                      : "text-white/60"
+                  }`}
                   style={{ width: `${(c.duration / totalDuration) * 100}%` }}
                   aria-label={`Run the wire from ${c.headline} (${fmt(chapterStart(i))})`}
                 >
-                  <span className="block">{c.year}</span>
-                  <span className="hidden opacity-60 sm:block">{fmt(chapterStart(i))}</span>
-                  {i > 0 && <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-white/40" />}
+                  {c.year}
                 </button>
               ))}
             </div>
-            {/* playhead */}
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 w-[3px] bg-white mix-blend-difference transition-[left] duration-200"
-              style={{ left: `${progress * 100}%` }}
-            />
           </div>
         </Reveal>
 
-        {/* ——— the cards ——— */}
-        <div className="mt-14 grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+        {/* ——— the moments: quiet posters, one voice at a time ——— */}
+        <div className="mt-16 grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
           {chapters.map((c, i) => {
             const active = started && i === chapterIdx;
-            const start = chapterStart(i);
             const cardTyped = active ? typed : null;
-            const cardDone = started && time >= start + c.duration - 0.05;
             const activeLine = cardTyped ? cardTyped.findLastIndex((n) => n > 0) : -1;
             return (
-              <Reveal key={c.id} delay={(i % 3) * 100} className="h-full">
+              <Reveal key={c.id} delay={(i % 3) * 100}>
                 <article
                   data-active={active}
-                  className={`flex h-full flex-col border-4 border-white bg-black transition-all duration-500 ${
-                    active
-                      ? "z-10 -translate-y-2 shadow-[10px_10px_0_rgba(255,255,255,0.35)]"
-                      : started && playing
-                        ? "opacity-45"
-                        : ""
+                  className={`transition-opacity duration-500 ${
+                    started && playing && !active ? "opacity-40" : ""
                   }`}
-                  style={{ transform: `rotate(${((i * 37) % 3) - 1}deg)${active ? " translateY(-8px)" : ""}` }}
                 >
-                  {/* dateline + timeline slot */}
-                  <header className="flex flex-wrap items-center justify-between gap-2 border-b-4 border-white px-4 py-2">
-                    <span className="display text-2xl">{c.year}</span>
-                    <span className="text-[0.6rem] font-bold uppercase tracking-[0.18em]">
-                      on the wire {fmt(start)} → {fmt(start + c.duration)}
-                    </span>
-                  </header>
-
-                  {/* artwork */}
-                  <div className="relative border-b-4 border-white">
+                  <button
+                    onClick={() => (active && playing ? hold() : playCard(i, true))}
+                    className="group relative block w-full border-2 border-white text-left"
+                    aria-label={
+                      active && playing
+                        ? `Pause ${c.headline}`
+                        : `Play ${c.headline} alone (${fmt(c.duration)})`
+                    }
+                  >
                     <MomentArt id={c.id} className="block aspect-[4/3] w-full" />
-                    <div aria-hidden className="dots-white pointer-events-none absolute inset-0 opacity-[0.07]" />
+
+                    {/* poster title */}
+                    <span className="absolute bottom-0 left-0 flex items-baseline gap-3 bg-black py-1 pl-0 pr-4">
+                      <span className="display border-t-2 border-white/0 pl-0 text-3xl">
+                        <span className="mr-3 text-base text-white/50">{c.year}</span>
+                        {c.headline}
+                      </span>
+                    </span>
+
+                    {/* on air */}
                     {active && playing && (
-                      <span className="absolute right-2 top-2 border-2 border-white bg-black px-2 py-1 text-[0.6rem] font-bold uppercase tracking-[0.18em]">
+                      <span className="absolute right-3 top-3 bg-white px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-[0.18em] text-black">
                         ● on air
                       </span>
                     )}
-                    <p className="absolute bottom-0 left-0 bg-black px-2 py-1 text-[0.55rem] font-bold uppercase tracking-[0.15em] text-white/70">
-                      art: gemini — or upload your own ↺
-                    </p>
-                  </div>
 
-                  <h3 className="display border-b-4 border-white px-4 py-3 text-4xl">{c.headline}</h3>
+                    {/* hover invitation */}
+                    {!(active && playing) && (
+                      <span className="absolute inset-0 hidden items-center justify-center bg-black/70 text-[0.7rem] font-bold uppercase tracking-[0.25em] group-hover:flex group-focus-visible:flex">
+                        ▶ play this moment · {fmt(c.duration)}
+                      </span>
+                    )}
+                  </button>
 
-                  {/* transcript */}
-                  <div className="flex-1 space-y-3 px-4 py-4 text-sm leading-relaxed">
-                    {active ? (
-                      c.lines.map((l, li) => {
+                  {/* transcript — only the moment on air speaks */}
+                  {active && (
+                    <div className="space-y-2.5 border-2 border-t-0 border-white px-4 py-4 text-sm leading-relaxed">
+                      {c.lines.map((l, li) => {
                         const n = cardTyped![li];
                         if (n === 0) return null;
                         const done = n >= l.text.length;
                         return (
                           <p
                             key={li}
-                            className={`${l.em ? "bg-white px-1 font-bold text-black" : ""} ${
+                            className={`${l.em ? "bg-white px-1 font-bold text-black" : "text-white/90"} ${
                               !done && li === activeLine && playing ? "caret" : ""
                             }`}
                           >
                             {l.text.slice(0, n)}
                           </p>
                         );
-                      })
-                    ) : cardDone ? (
-                      c.lines.map((l, li) => (
-                        <p key={li} className={`${l.em ? "bg-white px-1 font-bold text-black" : "text-white/80"}`}>
-                          {l.text}
-                        </p>
-                      ))
-                    ) : (
-                      <p className="text-white/40">“{c.lines[0].text}”…</p>
-                    )}
-                  </div>
-
-                  {/* card controls */}
-                  <footer className="mt-auto flex items-stretch border-t-4 border-white">
-                    <button
-                      onClick={() => (active && playing ? hold() : playCard(i, true))}
-                      className="flex-1 py-3 text-[0.65rem] font-bold uppercase tracking-[0.2em] transition-colors hover:bg-white hover:text-black"
-                    >
-                      {active && playing ? "❚❚ hold" : "▶ play this moment alone"}
-                    </button>
-                    <span className="border-l-4 border-white px-3 py-3 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-white/60">
-                      {fmt(c.duration)}
-                    </span>
-                  </footer>
+                      })}
+                    </div>
+                  )}
                 </article>
               </Reveal>
             );
           })}
         </div>
 
-        {ended && (
-          <Reveal>
-            <p className="stamp mt-12 text-sm">end of wire — fin.</p>
-          </Reveal>
-        )}
-
         <Reveal delay={200}>
-          <p className="mt-10 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-white/50">
-            prototype — artwork is procedural placeholder. in production every frame is generated by
-            gemini from your fragments, or you drop in your own photographs; every line is voiced
-            and scored by elevenlabs.
+          <p className="mt-14 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-white/40">
+            {ended ? "end of wire — fin. · " : ""}artwork: procedural placeholders — generated by
+            gemini from your fragments, or upload your own. voice &amp; score: elevenlabs.
           </p>
         </Reveal>
       </div>
