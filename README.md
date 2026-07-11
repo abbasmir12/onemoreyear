@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# One More Year
 
-## Getting Started
+**A cinematic memory.** You give us the fragments of something you love — the voice notes, the photographs, the things you only say at 2 a.m. We give you back the film of why it matters.
 
-First, run the development server:
+Built for the [DEV Weekend Challenge: Passion Edition](https://dev.to) (July 10–13, 2026).
+
+## What it is
+
+One More Year transforms a person's passion journey into a living cinematic memory:
+
+1. **Fragments** — you don't write your story; you empty your pockets. Voice notes, photos, half-sentences, in any order.
+2. **The AI Director** — Gemini reads the fragments, finds the arc you couldn't see from inside it, writes the script, designs one visual world, and decides where the silence goes.
+3. **Voice & Score** — ElevenLabs gives the story a narrator, the atmosphere (rain on an empty pitch, a hallway's hum, sixty thousand people standing), and the score.
+4. **The memory** — an interactive film: six moments across a career timeline (1998–2026), synchronized transcript, a light world that shifts with each chapter, and playback controls that behave like a career, not a media player.
+
+The featured demo tells the story of **Danny Moreau, №9** — a flat ball, a torn knee, and a man who could not stop.
+
+## Status: frontend prototype
+
+This is the complete experience design with mocked content. The AI generation pipeline is not wired yet:
+
+- The story script, timings, and world design in `lib/story.ts` stand in for **Gemini** output.
+- The ambient atmosphere is synthesized live with WebAudio (`lib/ambience.ts`) as a placeholder for **ElevenLabs** narration, sound design, and music.
+
+The generation pipeline drops in behind the exact interface in this prototype — nothing about the experience changes except that the story becomes yours.
+
+## Run it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. Headphones recommended.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Next.js (App Router) · TypeScript · Tailwind CSS v4 · WebAudio API · Fraunces + Geist Mono
 
-## Learn More
+## Challenge notes
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+All code in this repository was started and completed within the challenge window (July 10–13, 2026).
