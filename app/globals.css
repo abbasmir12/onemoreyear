@@ -197,7 +197,24 @@ body {
   color: var(--black);
 }
 
+/* ---- theater ---- */
+@keyframes pushin {
+  from { transform: scale(1.02); }
+  to { transform: scale(1.12); }
+}
+.pushin {
+  animation: pushin 26s linear forwards;
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+  animation: fade-up 0.7s ease both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .pushin { animation: none; }
   .ticker-track { animation: none; }
   .slam, .reveal, .strike::after, .circled::after { transition-duration: 0.01s; }
   html { scroll-behavior: auto; }

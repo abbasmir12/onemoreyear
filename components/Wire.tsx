@@ -11,6 +11,7 @@ import {
 import { AmbienceEngine } from "@/lib/ambience";
 import MomentArt from "./MomentArt";
 import Reveal from "./Reveal";
+import Theater from "./Theater";
 
 const CPS = 22; // teletype chars per second
 
@@ -34,6 +35,7 @@ export default function Wire() {
   const [started, setStarted] = useState(false);
   /** 'wire' plays every edition through; 'solo' stops at the end of one card */
   const [mode, setMode] = useState<"wire" | "solo">("wire");
+  const [theater, setTheater] = useState(false);
 
   const engineRef = useRef<AmbienceEngine | null>(null);
   const rafRef = useRef(0);
@@ -154,6 +156,15 @@ export default function Wire() {
               className="display border-4 border-white px-8 py-3 text-3xl transition-colors hover:bg-white hover:text-black"
             >
               {playing && mode === "wire" ? "❚❚ Hold the wire" : ended ? "↻ Run it again" : "▶ Run the wire"}
+            </button>
+            <button
+              onClick={() => {
+                hold();
+                setTheater(true);
+              }}
+              className="display bg-white px-8 py-3 text-3xl text-black outline outline-4 outline-white transition-colors hover:bg-black hover:text-white"
+            >
+              ⛶ Watch it as a film
             </button>
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-white/50">
               {fmt(totalDuration)} · six moments · or play any card alone
@@ -297,6 +308,8 @@ export default function Wire() {
           </p>
         </Reveal>
       </div>
+
+      {theater && <Theater onClose={() => setTheater(false)} />}
     </section>
   );
 }
