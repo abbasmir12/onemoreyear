@@ -18,12 +18,12 @@ export default function Notice() {
                 A team. A craft. A person. A stubborn, half-built dream. Empty your pockets —
                 we&rsquo;ll print the back page.
               </p>
-              <a
-                href="#scrapbook"
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent("open-studio"))}
                 className="display mt-10 inline-block border-4 border-white px-8 py-4 text-3xl transition-colors hover:bg-white hover:text-black"
               >
-                Place a notice
-              </a>
+                ▶ Start your story
+              </button>
             </div>
             <div className="dots-white hidden border-4 border-l-0 border-white md:block" aria-hidden />
           </div>

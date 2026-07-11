@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { tickerItems } from "@/lib/story";
+import { useEffect, useRef, useState } from "react";
+import Studio from "./Studio";
 
 export default function Hero() {
   const nineRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
+  const [studio, setStudio] = useState(false);
 
   useEffect(() => {
     let raf = 0;
@@ -28,22 +29,24 @@ export default function Hero() {
     };
   }, []);
 
-  const ticker = [...tickerItems, ...tickerItems];
+  // anywhere on the page can open the studio
+  useEffect(() => {
+    const open = () => setStudio(true);
+    window.addEventListener("open-studio", open);
+    return () => window.removeEventListener("open-studio", open);
+  }, []);
 
   return (
     <section className="relative flex min-h-svh flex-col overflow-hidden bg-white text-black">
-      {/* ticker masthead */}
-      <div className="flex items-stretch border-b-4 border-black">
-        <p className="display shrink-0 border-r-4 border-black px-4 py-2 text-lg">
-          One More Year
+      {/* nameplate */}
+      <div className="flex items-end justify-between border-b-4 border-black px-5 pb-3 pt-4 md:px-10">
+        <p className="display text-3xl leading-none md:text-5xl" aria-label="One More Year">
+          <span className="outline-text">One</span> <span>More</span>{" "}
+          <span className="bg-black px-2 text-white">Year</span>
         </p>
-        <div className="relative flex-1 overflow-hidden bg-black text-white">
-          <div className="ticker-track flex h-full w-max items-center gap-10 whitespace-nowrap px-4 text-xs font-bold tracking-widest">
-            {ticker.map((t, i) => (
-              <span key={i}>+++ {t}</span>
-            ))}
-          </div>
-        </div>
+        <p className="hidden pb-1 text-[0.6rem] font-bold uppercase tracking-[0.25em] sm:block">
+          The back page of a life · July 2026
+        </p>
       </div>
 
       <div className="relative flex flex-1 flex-col justify-center px-5 py-16 md:px-10">
@@ -55,7 +58,7 @@ export default function Hero() {
         >
           <span
             ref={nineRef}
-            className="dots-text display block select-none text-[22rem] leading-none md:text-[34rem]"
+            className="dots-text display block select-none text-[22rem] leading-none md:text-[32rem]"
             style={{ transform: "rotateZ(-8deg)", transformStyle: "preserve-3d" }}
           >
             9
@@ -63,10 +66,7 @@ export default function Hero() {
         </div>
 
         <div ref={headRef} className="relative">
-          <p className="mb-4 text-xs font-bold uppercase tracking-[0.3em]">
-            The back page of a life · July 2026
-          </p>
-          <h1 className="display text-[19vw] leading-[0.88] sm:text-[15vw] md:text-[11rem]">
+          <h1 className="display text-[17vw] leading-[0.88] sm:text-[13vw] md:text-[10rem]">
             Everyone
             <br />
             has one thing
@@ -77,21 +77,32 @@ export default function Hero() {
           </h1>
           <div className="mt-8 max-w-md text-sm leading-relaxed md:text-base">
             <p>
-              You hand over the fragments — voice notes, photographs, the things you only say at 2
-              a.m.
+              You answer a few questions. Gemini directs the story. ElevenLabs gives it a voice.
             </p>
-            <p className="mt-3 font-bold">We print the story of why it matters.</p>
+            <p className="mt-3 font-bold">We print the film of why it matters.</p>
           </div>
-          <p className="hand mt-6 -rotate-2 text-3xl">this one&rsquo;s about football. yours doesn&rsquo;t have to be.</p>
+
+          <div className="mt-10 flex flex-wrap items-center gap-4">
+            <button
+              onClick={() => setStudio(true)}
+              className="display bg-black px-10 py-4 text-3xl text-white transition-colors hover:bg-white hover:text-black hover:outline hover:outline-4 hover:outline-black md:text-4xl"
+            >
+              ▶ Start your story
+            </button>
+            <a
+              href="#wire"
+              className="display border-4 border-black px-8 py-4 text-2xl transition-colors hover:bg-black hover:text-white md:text-3xl"
+            >
+              Read tonight&rsquo;s edition ↓
+            </a>
+          </div>
+          <p className="hand mt-6 -rotate-2 text-3xl">
+            tonight&rsquo;s edition is about football. yours doesn&rsquo;t have to be.
+          </p>
         </div>
       </div>
 
-      <a
-        href="#scrapbook"
-        className="display block border-t-4 border-black py-4 text-center text-2xl transition-colors hover:bg-black hover:text-white"
-      >
-        Turn over ↓
-      </a>
+      {studio && <Studio onClose={() => setStudio(false)} />}
     </section>
   );
 }

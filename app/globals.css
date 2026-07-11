@@ -69,13 +69,10 @@ body {
   padding-top: calc(6vw + 5rem);
 }
 
-/* ---- ticker ---- */
-@keyframes ticker-run {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-.ticker-track {
-  animation: ticker-run 28s linear infinite;
+/* ---- wordmark ---- */
+.outline-text {
+  -webkit-text-stroke: 2.5px var(--black);
+  -webkit-text-fill-color: transparent;
 }
 
 /* ---- headline slam reveal ---- */

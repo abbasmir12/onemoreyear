@@ -85,9 +85,12 @@ export class AmbienceEngine {
 
   async play(scene: Ambience) {
     this.ensure();
-    await this.ctx!.resume();
+    const ctx = this.ctx!;
+    await ctx.resume();
+    // the engine may have been disposed while resume() was pending
+    if (this.ctx !== ctx) return;
     this.setScene(scene);
-    this.master!.gain.setTargetAtTime(1, this.ctx!.currentTime, 0.8);
+    this.master!.gain.setTargetAtTime(1, ctx.currentTime, 0.8);
   }
 
   /** one teletype key-click */

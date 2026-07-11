@@ -198,11 +198,3 @@ export const editorSteps = [
   "deciding where the silence goes…",
   "sending it to the voice desk.",
 ];
-
-export const tickerItems = [
-  "MOREAU SAYS YES TO ONE MORE YEAR",
-  "FLAT BALL, BIG DREAMS — A YARD STORY",
-  "19 MONTHS: THE COMEBACK NOBODY PRINTED",
-  "SIXTY THOUSAND ON THEIR FEET FOR A SIX-YARD PASS",
-  "WHAT'S THE THING YOU CAN'T QUIT?",
-];

@@ -71,9 +71,11 @@ export default function Masthead() {
               page, printed.
             </p>
             <p className="mt-6 max-w-2xl text-sm leading-relaxed text-white/80">
-              This prototype mocks both desks so the experience could be designed first. The
-              generation pipeline drops in behind the exact page you just read — nothing changes
-              except the story becomes yours.
+              This prototype mocks both desks so the experience could be designed first. The real
+              pipeline drops in behind the same screens: Gemini via the Interactions API with
+              structured output (story arc as JSON) and gemini-3-pro-image-preview for the frames;
+              ElevenLabs via eleven_v3 with audio tags — [quiet], [rain], [crowd swells] — and the
+              Text to Dialogue API for narration and score.
             </p>
           </div>
         </Reveal>
