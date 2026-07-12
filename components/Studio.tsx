@@ -4,29 +4,64 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MomentArt from "./MomentArt";
 import Theater from "./Theater";
 import SettingsPanel from "./Settings";
-import { loadSettings, type Settings } from "@/lib/settings";
+import { loadSettings, hasDirector, type Settings } from "@/lib/settings";
 import {
-  generateStory,
-  generateImage,
+  directDocumentary,
+  generateFrame,
+  stockFrame,
   synthesize,
   makeSfx,
   makeMusic,
   audioDuration,
-  type GeneratedStory,
+  castVoices,
+  VOICE_POOL,
+  type DocumentaryPlan,
   type Asset,
 } from "@/lib/generate";
-import { printFilm } from "@/lib/assemble";
+import { printDocumentary } from "@/lib/assemble";
 
 type Phase = "gate" | "interview" | "agent" | "proof" | "print";
 type VoiceState = "idle" | "loading" | "playing" | "error";
 type DeskState = { s: "wait" | "run" | "done" | "skip" | "error"; note?: string };
 
+const QUESTIONS = [
+  {
+    q: "What's the thing you can't quit?",
+    ph: "football. a person. a half-built dream.",
+  },
+  {
+    q: "When did it almost end?",
+    ph: "the injury. the move. the year nobody called.",
+  },
+  {
+    q: "Why did you stay?",
+    ph: "say it like you'd say it at 2 a.m.",
+  },
+  {
+    q: "Give us one line only you would say.",
+    ph: "the grass smell before kickoff. that's the whole reason.",
+  },
+];
+
+/** the director's process, narrated while the real call runs */
+const STEPS = [
+  { call: "reading the fragments", out: "the dates, the doubt, the things said sideways…" },
+  { call: "finding the arc", out: "the turn, the quiet year, the reason you stayed…" },
+  { call: "casting the film", out: "a narrator, you, and the people who watched you not quit…" },
+  { call: "writing the talking heads", out: "letting the voices disagree a little…" },
+  { call: "scouting the frames", out: "one photograph per beat, black & white, no captions…" },
+  { call: "voice direction · eleven_v3", out: "[quiet] [warmer] [steady] [almost a whisper]" },
+  { call: "silence map", out: "deciding where the silence goes…" },
+];
+
+const STEP_MS = 1400;
+
 const DESKS: { id: string; label: string }[] = [
-  { id: "narration", label: "The voice desk — eleven_v3 narration" },
-  { id: "frame", label: "The picture desk — the film frame" },
-  { id: "sfx", label: "The foley desk — sound-generation room tone" },
+  { id: "voices", label: "The voice desk — the cast records" },
+  { id: "frames", label: "The picture desk — one frame per scene" },
+  { id: "sfx", label: "The foley desk — room tone" },
   { id: "music", label: "The score desk — eleven music" },
-  { id: "print", label: "The print desk — ffmpeg.wasm mix & mp4" },
+  { id: "print", label: "The print desk — ffmpeg.wasm cut & mix" },
 ];
 const DESKS_IDLE: Record<string, DeskState> = Object.fromEntries(
   DESKS.map((d) => [d.id, { s: "wait" } as DeskState])
@@ -54,51 +89,6 @@ async function svgToPngBytes(svgEl: SVGSVGElement, w = 1280, h = 960): Promise<U
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-const QUESTIONS = [
-  {
-    q: "What's the thing you can't quit?",
-    ph: "football. a person. a half-built dream.",
-  },
-  {
-    q: "When did it almost end?",
-    ph: "the injury. the move. the year nobody called.",
-  },
-  {
-    q: "Why did you stay?",
-    ph: "say it like you'd say it at 2 a.m.",
-  },
-  {
-    q: "Give us one line only you would say.",
-    ph: "the grass smell before kickoff. that's the whole reason.",
-  },
-];
-
-/** the agent run, step by step */
-const STEPS = [
-  {
-    call: "POST generateContent",
-    out: "reading your 4 fragments — the dates, the doubt, the things said sideways…",
-  },
-  {
-    call: "structured output · response_schema: story_arc.json",
-    out: "finding the arc you couldn't see from inside it…",
-  },
-  {
-    call: "casting the headline",
-    out: "naming the thing you love, in four words or fewer…",
-  },
-  {
-    call: "voice direction · eleven_v3 audio tags",
-    out: "[quiet] [warmer] [steady] [almost a whisper] [long pause]",
-  },
-  {
-    call: "silence map",
-    out: "deciding where the silence goes…",
-  },
-];
-
-const STEP_MS = 1400;
-
 export default function Studio({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<Phase>("gate");
   const [qi, setQi] = useState(0);
@@ -108,15 +98,15 @@ export default function Studio({ onClose }: { onClose: () => void }) {
   const [theater, setTheater] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [story, setStory] = useState<GeneratedStory | null>(null);
+  const [plan, setPlan] = useState<DocumentaryPlan | null>(null);
   const [genState, setGenState] = useState<"pending" | "done" | "error">("pending");
   const [genError, setGenError] = useState("");
   const [voice, setVoice] = useState<VoiceState>("idle");
   const [voiceError, setVoiceError] = useState("");
   const [desks, setDesks] = useState<Record<string, DeskState>>(DESKS_IDLE);
   const [film, setFilm] = useState<string | null>(null);
-  const [frameUrl, setFrameUrl] = useState<string | null>(null);
   const [ffLog, setFfLog] = useState("");
+  const [uploads, setUploads] = useState<File[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -125,10 +115,14 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     setSettings(loadSettings());
   }, [settingsOpen]);
 
-  const ready = !!settings?.geminiKey;
+  const ready = hasDirector(settings);
   const hasVoice = !!settings?.elevenKey;
+  const providerName = settings?.openrouterKey
+    ? `openrouter · ${settings.openrouterModel}`
+    : settings?.geminiKey
+      ? settings.geminiModel
+      : "";
 
-  // the studio opens on the gate until the director is connected
   useEffect(() => {
     if (phase === "gate" && ready) setPhase("interview");
   }, [phase, ready]);
@@ -141,7 +135,6 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     []
   );
 
-  // lock page scroll
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
@@ -153,7 +146,6 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     if (phase === "interview") inputRef.current?.focus();
   }, [phase, qi]);
 
-  // esc closes (theater and settings handle their own esc first)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !theater && !settingsOpen) onClose();
@@ -166,7 +158,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (phase !== "agent") return;
     if (step >= STEPS.length) {
-      if (genState !== "done") return; // pending: hold · error: shown in console
+      if (genState !== "done") return;
       const id = setTimeout(() => setPhase("proof"), 900);
       return () => clearTimeout(id);
     }
@@ -176,19 +168,19 @@ export default function Studio({ onClose }: { onClose: () => void }) {
 
   const startAgent = useCallback(
     (finalAnswers: string[]) => {
-      if (!settings?.geminiKey) return;
+      if (!settings || !hasDirector(settings)) return;
       setPhase("agent");
       setStep(0);
-      setStory(null);
+      setPlan(null);
       setGenError("");
       setGenState("pending");
-      generateStory(finalAnswers, settings)
-        .then((s) => {
-          setStory(s);
+      directDocumentary(finalAnswers, settings)
+        .then((p) => {
+          setPlan(p);
           setGenState("done");
         })
         .catch((e) => {
-          setGenError(e instanceof Error ? e.message : String(e));
+          setGenError(errMsg(e));
           setGenState("error");
         });
     },
@@ -207,8 +199,14 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     [draft, qi, answers, startAgent]
   );
 
-  const hear = useCallback(async () => {
-    if (!settings?.elevenKey || !story) return;
+  const voices = useMemo(
+    () => (plan && settings ? castVoices(plan.cast, settings.elevenVoiceId) : {}),
+    [plan, settings]
+  );
+
+  /** preview: the cold open, in the subject's cast voice */
+  const preview = useCallback(async () => {
+    if (!settings?.elevenKey || !plan) return;
     if (voice === "playing") {
       audioRef.current?.pause();
       setVoice("idle");
@@ -217,10 +215,8 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     setVoice("loading");
     setVoiceError("");
     try {
-      const asset = await synthesize(
-        story.lines.map((l) => `${l.tag} ${l.text}`).join("\n"),
-        settings
-      );
+      const seg = plan.segments[0];
+      const asset = await synthesize(`${seg.tag} ${seg.text}`, voices[seg.speaker], settings);
       audioRef.current?.pause();
       const audio = new Audio(asset.url);
       audioRef.current = audio;
@@ -228,59 +224,66 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       await audio.play();
       setVoice("playing");
     } catch (e) {
-      setVoiceError(e instanceof Error ? e.message : String(e));
+      setVoiceError(errMsg(e));
       setVoice("error");
     }
-  }, [settings, story, voice]);
+  }, [settings, plan, voices, voice]);
 
   /** the print run — every desk does its real job, then ffmpeg binds the edition */
   const produce = useCallback(async () => {
-    if (!settings?.elevenKey || !story) return;
-    // rasterize the house art now, while the proof's SVG is still mounted
+    if (!settings?.elevenKey || !plan) return;
     let artBytes: Uint8Array | null = null;
     const svg = frameRef.current?.querySelector("svg");
     if (svg) artBytes = await svgToPngBytes(svg as unknown as SVGSVGElement).catch(() => null);
 
     setPhase("print");
     setFilm(null);
-    setFrameUrl(null);
     setFfLog("");
     setDesks({ ...DESKS_IDLE });
     const upd = (k: string, v: DeskState) => setDesks((p) => ({ ...p, [k]: v }));
 
     try {
-      // 1 · narration first — its length times everything else
-      upd("narration", { s: "run" });
-      const narration = await synthesize(
-        story.lines.map((l) => `${l.tag} ${l.text}`).join("\n"),
-        settings
-      );
-      const dur = await audioDuration(narration.url).catch(() => 30);
-      upd("narration", { s: "done", note: `${dur.toFixed(1)}s · ${settings.elevenModel}` });
+      const segs = plan.segments;
 
-      // 2 · the frame — Gemini draws it, or the house art steps in
-      upd("frame", { s: "run" });
-      let frameBytes = artBytes;
-      if (settings.imageSource === "ai" && story.image_prompt) {
-        try {
-          const img = await generateImage(story.image_prompt, settings);
-          frameBytes = img.bytes;
-          setFrameUrl(img.url);
-          upd("frame", { s: "done", note: settings.geminiImageModel });
-        } catch (e) {
-          upd("frame", { s: "error", note: `${errMsg(e)} — using house art` });
-        }
-      } else {
-        upd("frame", { s: "done", note: "house style" });
+      // 1 · the cast records, one talking head at a time
+      const audios: { bytes: Uint8Array; duration: number }[] = [];
+      for (let i = 0; i < segs.length; i++) {
+        upd("voices", { s: "run", note: `segment ${i + 1}/${segs.length}` });
+        const a = await synthesize(`${segs[i].tag} ${segs[i].text}`, voices[segs[i].speaker], settings);
+        const d = await audioDuration(a.url).catch(() => 6);
+        audios.push({ bytes: a.bytes, duration: d });
       }
-      if (!frameBytes) throw new Error("no frame available");
+      const total = audios.reduce((s, a) => s + a.duration, 0);
+      upd("voices", { s: "done", note: `${segs.length} voices · ${total.toFixed(0)}s` });
+
+      // 2 · one frame per scene
+      const frames: Uint8Array[] = [];
+      const uploadBytes: Uint8Array[] = await Promise.all(
+        uploads.map(async (f) => new Uint8Array(await f.arrayBuffer()))
+      );
+      let framesNote: string = settings.imageSource;
+      for (let i = 0; i < segs.length; i++) {
+        upd("frames", { s: "run", note: `scene ${i + 1}/${segs.length} · ${settings.imageSource}` });
+        let bytes: Uint8Array | null = null;
+        try {
+          if (settings.imageSource === "ai") bytes = (await generateFrame(segs[i].scene, settings)).bytes;
+          else if (settings.imageSource === "stock") bytes = (await stockFrame(segs[i].scene)).bytes;
+          else if (settings.imageSource === "upload" && uploadBytes.length)
+            bytes = uploadBytes[i % uploadBytes.length];
+        } catch {
+          framesNote = `${settings.imageSource}, some fell back to house art`;
+        }
+        frames.push(bytes ?? artBytes ?? new Uint8Array());
+      }
+      if (frames.some((f) => f.length === 0)) throw new Error("no frames available");
+      upd("frames", { s: "done", note: framesNote });
 
       // 3 · room tone
       let sfx: Asset | null = null;
       upd("sfx", { s: "run" });
-      if (story.sfx_prompt) {
+      if (plan.sfx_prompt) {
         try {
-          sfx = await makeSfx(story.sfx_prompt, Math.min(dur, 22), settings);
+          sfx = await makeSfx(plan.sfx_prompt, Math.min(total, 22), settings);
           upd("sfx", { s: "done" });
         } catch (e) {
           upd("sfx", { s: "skip", note: errMsg(e) });
@@ -290,9 +293,9 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       // 4 · score
       let music: Asset | null = null;
       upd("music", { s: "run" });
-      if (story.music_prompt) {
+      if (plan.music_prompt) {
         try {
-          music = await makeMusic(story.music_prompt, (dur + 2) * 1000, settings);
+          music = await makeMusic(plan.music_prompt, (total + 2) * 1000, settings);
           upd("music", { s: "done" });
         } catch (e) {
           upd("music", { s: "skip", note: errMsg(e) });
@@ -301,9 +304,12 @@ export default function Studio({ onClose }: { onClose: () => void }) {
 
       // 5 · print
       upd("print", { s: "run" });
-      const url = await printFilm({
-        frame: frameBytes,
-        narration: narration.bytes,
+      const url = await printDocumentary({
+        segments: segs.map((_, i) => ({
+          audio: audios[i].bytes,
+          frame: frames[i],
+          duration: audios[i].duration,
+        })),
         music: music?.bytes ?? null,
         sfx: sfx?.bytes ?? null,
         onLog: (l) => setFfLog(l),
@@ -313,7 +319,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     } catch (e) {
       upd("print", { s: "error", note: errMsg(e) });
     }
-  }, [settings, story]);
+  }, [settings, plan, voices, uploads]);
 
   const fragments = useMemo(
     () =>
@@ -325,7 +331,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     [answers]
   );
 
-  const headlineOf = (story?.headline || "").toUpperCase();
+  const voiceLabel = (id: string) => VOICE_POOL.find((v) => v.id === id)?.label ?? id.slice(0, 8);
 
   return (
     <div
@@ -371,22 +377,22 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               </span>
             </h2>
             <p className="mt-8 max-w-lg text-sm leading-relaxed md:text-base">
-              Your story is written live by Gemini and spoken by ElevenLabs — nothing canned.
-              Connect your keys once and they stay in this browser&rsquo;s localStorage. They never
-              touch a server.
+              Your documentary is written live, voiced by a real cast, and printed to film — nothing
+              canned. Connect your keys once and they stay in this browser&rsquo;s localStorage.
+              They never touch a server.
             </p>
 
             <div className="mt-10 max-w-lg space-y-3 font-mono text-sm">
               <p className="flex items-center justify-between border-2 border-black px-4 py-3">
-                <span>Gemini API key — writes your story</span>
+                <span>OpenRouter or Gemini key — the director</span>
                 <span className={ready ? "" : "bg-black px-2 py-0.5 text-white"}>
                   {ready ? "✓ connected" : "required"}
                 </span>
               </p>
               <p className="flex items-center justify-between border-2 border-black/40 px-4 py-3">
-                <span>ElevenLabs API key — speaks it</span>
+                <span>ElevenLabs key — the cast, tone &amp; score</span>
                 <span className={hasVoice ? "" : "text-black/50"}>
-                  {hasVoice ? "✓ connected" : "optional"}
+                  {hasVoice ? "✓ connected" : "for the film"}
                 </span>
               </p>
             </div>
@@ -398,7 +404,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               ⚙ Open the press room
             </button>
             <p className="mt-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-black/50">
-              free keys: aistudio.google.com · elevenlabs.io
+              keys: openrouter.ai · aistudio.google.com · elevenlabs.io
             </p>
           </div>
         </div>
@@ -468,7 +474,9 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                     <p className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/50">
                       {f.label}
                     </p>
-                    <p className={`hand mt-1 text-2xl leading-tight ${f.real ? "" : "text-white/40"}`}>
+                    <p
+                      className={`hand mt-1 text-2xl leading-tight ${f.real ? "" : "text-white/40"}`}
+                    >
                       “{f.text}”
                     </p>
                   </div>
@@ -478,7 +486,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
 
             <div>
               <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-white/50">
-                gemini is directing — live
+                the director is working — live
               </p>
               <div className="mt-6 border-2 border-white/40 p-5 font-mono text-sm leading-relaxed md:p-7">
                 {STEPS.slice(0, Math.min(step + 1, STEPS.length)).map((s, i) => (
@@ -494,12 +502,12 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 ))}
                 {step >= STEPS.length && genState === "pending" && (
                   <p className="fade-up mt-6 animate-pulse text-white/80">
-                    █ gemini is writing — waiting for the director…
+                    █ the director is writing — waiting…
                   </p>
                 )}
                 {step >= STEPS.length && genState === "done" && (
                   <p className="fade-up mt-6 bg-white px-2 py-1 font-bold text-black">
-                    ✓ first proof ready — sending it to press…
+                    ✓ script and cast ready — sending to the proof…
                   </p>
                 )}
                 {step >= STEPS.length && genState === "error" && (
@@ -525,7 +533,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 )}
               </div>
               <p className="mt-4 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
-                live — your story is being written by {settings?.geminiModel} right now
+                live — your documentary is being written by {providerName} right now
               </p>
             </div>
           </div>
@@ -533,50 +541,100 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       )}
 
       {/* ——— phase 3 · the first proof ——— */}
-      {phase === "proof" && story && (
+      {phase === "proof" && plan && (
         <div className="px-5 py-14 md:px-10">
           <div className="mx-auto w-full max-w-5xl">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-black/50">
-                your back page · first proof
+                your documentary · first proof
               </p>
-              <span className="stamp text-xs">live · written by {settings?.geminiModel}</span>
+              <span className="stamp text-xs">live · written by {providerName}</span>
             </div>
 
             <h2 className="display mt-8 text-6xl leading-[0.9] sm:text-8xl">
               One more year
               <br />
               <span className="mt-[0.08em] inline-block bg-black px-3 pb-[0.05em] text-white">
-                of {headlineOf}.
+                of {plan.headline.toUpperCase()}.
               </span>
             </h2>
+            <p className="mt-6 max-w-xl text-sm italic leading-relaxed text-black/70">
+              {plan.logline}
+            </p>
 
-            <div className="mt-12 grid gap-10 md:grid-cols-2">
-              <div ref={frameRef} className="border-4 border-black">
-                <MomentArt id="onemore" className="block aspect-[4/3] w-full" />
-                <p className="border-t-4 border-black px-3 py-2 text-[0.6rem] font-bold uppercase tracking-[0.18em]">
-                  {settings?.imageSource === "ai"
-                    ? `frame · ${settings.geminiImageModel} draws it at print time`
-                    : "frame · house style — switch to AI in the press room"}
-                </p>
+            {/* the cast */}
+            <div className="mt-10 border-4 border-black">
+              <p className="border-b-4 border-black px-4 py-2 text-[0.65rem] font-bold uppercase tracking-[0.2em]">
+                the cast · voices from elevenlabs
+              </p>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4">
+                {plan.cast.map((c, i) => (
+                  <div
+                    key={c.id}
+                    className={`px-4 py-3 ${i > 0 ? "border-t-2 border-black sm:border-t-0 sm:border-l-2" : ""}`}
+                  >
+                    <p className="display text-xl">{c.role}</p>
+                    <p className="mt-1 font-mono text-[0.7rem] text-black/60">
+                      wants: {c.voice}
+                      <br />
+                      cast: {voiceLabel(voices[c.id])}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-12 grid gap-10 md:grid-cols-[1fr_1.4fr]">
+              <div>
+                <div ref={frameRef} className="border-4 border-black">
+                  <MomentArt id="onemore" className="block aspect-[4/3] w-full" />
+                  <p className="border-t-4 border-black px-3 py-2 text-[0.6rem] font-bold uppercase tracking-[0.18em]">
+                    {settings?.imageSource === "ai" && "frames · drawn per scene at print time"}
+                    {settings?.imageSource === "stock" && "frames · free stock photos per scene"}
+                    {settings?.imageSource === "upload" && "frames · your photographs"}
+                    {settings?.imageSource === "art" && "frames · house style"}
+                  </p>
+                </div>
+
+                {settings?.imageSource === "upload" && (
+                  <div className="mt-4 border-2 border-black p-4">
+                    <label
+                      htmlFor="upload-input"
+                      className="text-[0.65rem] font-bold uppercase tracking-[0.2em]"
+                    >
+                      your photographs ({uploads.length} chosen)
+                    </label>
+                    <input
+                      id="upload-input"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => setUploads([...(e.target.files ?? [])])}
+                      className="mt-2 block w-full font-mono text-xs"
+                    />
+                    <p className="mt-2 text-[0.7rem] text-black/50">
+                      they&rsquo;ll be cut across the {plan.segments.length} scenes in order
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
                 <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-black/50">
-                  script proof · {settings?.elevenModel || "eleven_v3"} audio tags
+                  the script · {plan.segments.length} talking heads
                 </p>
-                <div className="mt-4 space-y-4 font-mono text-base leading-relaxed">
-                  {story.lines.map((l, i) =>
-                    l.em ? (
-                      <p key={i} className="bg-black px-2 py-1 font-bold text-white">
-                        <span className="opacity-50">{l.tag}</span> {l.text}
-                      </p>
-                    ) : (
-                      <p key={i}>
-                        <span className="text-black/40">{l.tag}</span> {l.text}
-                      </p>
-                    )
-                  )}
+                <div className="mt-4 space-y-4 font-mono text-sm leading-relaxed">
+                  {plan.segments.map((seg, i) => {
+                    const member = plan.cast.find((c) => c.id === seg.speaker);
+                    return (
+                      <div key={i} className={seg.em ? "bg-black px-3 py-2 text-white" : ""}>
+                        <p className={`text-[0.6rem] font-bold uppercase tracking-[0.2em] ${seg.em ? "text-white/60" : "text-black/50"}`}>
+                          {member?.role ?? seg.speaker} <span className="normal-case">{seg.tag}</span>
+                        </p>
+                        <p className={seg.em ? "font-bold" : ""}>{seg.text}</p>
+                      </div>
+                    );
+                  })}
                   <p className="text-black/40">[long pause] [fin]</p>
                 </div>
 
@@ -591,30 +649,24 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   )}
                   {hasVoice ? (
                     <button
-                      onClick={hear}
+                      onClick={preview}
                       disabled={voice === "loading"}
                       className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white disabled:opacity-60"
                     >
                       {voice === "loading"
-                        ? "… casting the voice"
+                        ? "… casting"
                         : voice === "playing"
                           ? "❚❚ Stop"
-                          : "▶ Hear it"}
+                          : "▶ Hear the cold open"}
                     </button>
                   ) : (
                     <button
                       onClick={() => setSettingsOpen(true)}
                       className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
                     >
-                      ⚙ Add a voice — ElevenLabs
+                      ⚙ Add the cast — ElevenLabs
                     </button>
                   )}
-                  <button
-                    onClick={() => setTheater(true)}
-                    className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
-                  >
-                    ⛶ Watch the demo film
-                  </button>
                   <button
                     onClick={() => {
                       audioRef.current?.pause();
@@ -623,7 +675,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                       setQi(0);
                       setAnswers([]);
                       setStep(0);
-                      setStory(null);
+                      setPlan(null);
                       setGenState("pending");
                     }}
                     className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
@@ -637,12 +689,6 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                     try model eleven_multilingual_v2 in the press room (⚙).
                   </p>
                 )}
-                <p className="mt-6 max-w-md text-xs leading-relaxed text-black/60">
-                  This script was written live by Gemini from your answers.
-                  {hasVoice
-                    ? " Press hear it and ElevenLabs speaks it, audio tags and all."
-                    : " Add an ElevenLabs key in the press room to hear it read aloud."}
-                </p>
               </div>
             </div>
           </div>
@@ -650,11 +696,11 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       )}
 
       {/* ——— phase 4 · the print run ——— */}
-      {phase === "print" && story && (
+      {phase === "print" && plan && (
         <div className="min-h-[calc(100svh-64px)] bg-black px-5 py-14 text-white md:px-10">
           <div className="mx-auto w-full max-w-5xl">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-white/50">
-              the print run · one more year of {story.headline}
+              the print run · one more year of {plan.headline}
             </p>
 
             {!film ? (
@@ -702,8 +748,15 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
                 <p className="mt-4 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
-                  everything runs in your browser — narration and score from elevenlabs, the frame
-                  from gemini, the mix and mp4 from ffmpeg.wasm
+                  everything runs in your browser — cast &amp; score from elevenlabs, frames from{" "}
+                  {settings?.imageSource === "ai"
+                    ? "the image model"
+                    : settings?.imageSource === "stock"
+                      ? "assetpipe stock"
+                      : settings?.imageSource === "upload"
+                        ? "your photographs"
+                        : "the house art"}
+                  , the cut and mp4 from ffmpeg.wasm
                 </p>
               </>
             ) : (
@@ -718,7 +771,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 <div className="mt-8 flex flex-wrap gap-4">
                   <a
                     href={film}
-                    download={`one-more-year-of-${story.headline.replace(/\s+/g, "-")}.mp4`}
+                    download={`one-more-year-of-${plan.headline.replace(/\s+/g, "-")}.mp4`}
                     className="display bg-white px-6 py-3 text-2xl text-black transition-colors hover:bg-black hover:text-white hover:outline hover:outline-4 hover:outline-white"
                   >
                     ↓ Keep your film
@@ -736,12 +789,10 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                     ↻ Reprint
                   </button>
                 </div>
-                {frameUrl && (
-                  <p className="mt-6 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
-                    frame drawn by {settings?.geminiImageModel} · narration &amp; score by
-                    elevenlabs · printed by ffmpeg.wasm in your browser
-                  </p>
-                )}
+                <p className="mt-6 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
+                  {plan.cast.length} voices · {plan.segments.length} scenes · cut, mixed and printed
+                  by ffmpeg.wasm in your browser
+                </p>
               </>
             )}
           </div>

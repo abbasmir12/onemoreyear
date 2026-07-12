@@ -11,28 +11,47 @@ const FIELDS: {
   secret?: boolean;
 }[] = [
   {
+    key: "openrouterKey",
+    label: "OpenRouter API key",
+    hint: "openrouter.ai → Keys. The preferred director: script and frames run through it when set.",
+    placeholder: "sk-or-…",
+    secret: true,
+  },
+  {
+    key: "openrouterModel",
+    label: "OpenRouter script model",
+    hint: "any chat model — writes the documentary",
+    placeholder: DEFAULTS.openrouterModel,
+  },
+  {
+    key: "openrouterImageModel",
+    label: "OpenRouter image model",
+    hint: "an image-output model (modalities: image) — draws the frames",
+    placeholder: DEFAULTS.openrouterImageModel,
+  },
+  {
     key: "geminiKey",
-    label: "Gemini API key",
-    hint: "aistudio.google.com → Get API key. Powers the director: your story is written live.",
+    label: "Gemini API key (fallback)",
+    hint: "aistudio.google.com → Get API key. Used when no OpenRouter key is set.",
     placeholder: "AIza…",
     secret: true,
   },
   {
     key: "geminiModel",
     label: "Gemini model",
-    hint: "any generateContent model works",
+    hint: "any generateContent model",
     placeholder: DEFAULTS.geminiModel,
   },
   {
     key: "geminiImageModel",
     label: "Gemini image model",
-    hint: "generates the film frame when the frame source is set to AI",
+    hint: "draws frames when Gemini is the provider",
     placeholder: DEFAULTS.geminiImageModel,
   },
   {
     key: "elevenKey",
     label: "ElevenLabs API key",
-    hint: "elevenlabs.io → Profile → API keys. Powers the voice: your proof is spoken aloud.",
+    hint: "elevenlabs.io → Profile → API keys. Voices the whole cast, plus room tone and score.",
     placeholder: "sk_…",
     secret: true,
   },
@@ -44,10 +63,17 @@ const FIELDS: {
   },
   {
     key: "elevenVoiceId",
-    label: "Voice ID",
-    hint: "any voice from your ElevenLabs voice library",
+    label: "Narrator voice ID",
+    hint: "the narrator's voice — the rest of the cast is drawn from a premade pool",
     placeholder: DEFAULTS.elevenVoiceId,
   },
+];
+
+const IMAGE_SOURCES: { v: Settings["imageSource"]; label: string }[] = [
+  { v: "ai", label: "AI — drawn per scene" },
+  { v: "stock", label: "Stock — free photos" },
+  { v: "upload", label: "Your own photos" },
+  { v: "art", label: "House art" },
 ];
 
 export default function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -90,9 +116,9 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-7 px-6 py-7">
           <p className="text-xs leading-relaxed text-black/70">
-            The studio runs on your own keys: Gemini writes your story, ElevenLabs speaks it. A
-            Gemini key is required to begin; ElevenLabs is optional (it adds the voice). Keys are
-            stored in <b>this browser&rsquo;s localStorage only</b> — they never touch a server.
+            The studio runs on your own keys. The director needs <b>OpenRouter or Gemini</b>;
+            ElevenLabs voices the cast. Keys are stored in{" "}
+            <b>this browser&rsquo;s localStorage only</b> — they never touch a server.
           </p>
 
           {FIELDS.map((f) => (
@@ -119,26 +145,22 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
           <div>
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em]">Film frame source</p>
-            <div className="mt-2 flex">
-              {(
-                [
-                  ["ai", "AI — Gemini draws it"],
-                  ["art", "House style — procedural"],
-                ] as const
-              ).map(([v, label]) => (
+            <div className="mt-2 flex flex-wrap">
+              {IMAGE_SOURCES.map(({ v, label }, i) => (
                 <button
                   key={v}
                   onClick={() => setS({ ...s, imageSource: v })}
                   className={`border-2 border-black px-4 py-2 font-mono text-xs transition-colors ${
                     s.imageSource === v ? "bg-black text-white" : "hover:bg-black/10"
-                  } ${v === "art" ? "border-l-0" : ""}`}
+                  } ${i > 0 ? "border-l-0" : ""}`}
                 >
                   {label}
                 </button>
               ))}
             </div>
             <p className="mt-1.5 text-[0.7rem] text-black/50">
-              used when your film is printed — you can change it any time
+              one frame per scene — AI draws them, stock searches free photos (assetpipe), or bring
+              your own
             </p>
           </div>
 
