@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { loadSettings, saveSettings, DEFAULTS, type Settings } from "@/lib/settings";
 
 const FIELDS: {
-  key: keyof Settings;
+  key: Exclude<keyof Settings, "imageSource">;
   label: string;
   hint: string;
   placeholder: string;
@@ -22,6 +22,12 @@ const FIELDS: {
     label: "Gemini model",
     hint: "any generateContent model works",
     placeholder: DEFAULTS.geminiModel,
+  },
+  {
+    key: "geminiImageModel",
+    label: "Gemini image model",
+    hint: "generates the film frame when the frame source is set to AI",
+    placeholder: DEFAULTS.geminiImageModel,
   },
   {
     key: "elevenKey",
@@ -110,6 +116,31 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
               <p className="mt-1.5 text-[0.7rem] text-black/50">{f.hint}</p>
             </div>
           ))}
+
+          <div>
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em]">Film frame source</p>
+            <div className="mt-2 flex">
+              {(
+                [
+                  ["ai", "AI — Gemini draws it"],
+                  ["art", "House style — procedural"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setS({ ...s, imageSource: v })}
+                  className={`border-2 border-black px-4 py-2 font-mono text-xs transition-colors ${
+                    s.imageSource === v ? "bg-black text-white" : "hover:bg-black/10"
+                  } ${v === "art" ? "border-l-0" : ""}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[0.7rem] text-black/50">
+              used when your film is printed — you can change it any time
+            </p>
+          </div>
 
           <div className="flex items-center gap-4 pt-1">
             <button

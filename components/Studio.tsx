@@ -5,10 +5,54 @@ import MomentArt from "./MomentArt";
 import Theater from "./Theater";
 import SettingsPanel from "./Settings";
 import { loadSettings, type Settings } from "@/lib/settings";
-import { generateStory, synthesize, type GeneratedStory } from "@/lib/generate";
+import {
+  generateStory,
+  generateImage,
+  synthesize,
+  makeSfx,
+  makeMusic,
+  audioDuration,
+  type GeneratedStory,
+  type Asset,
+} from "@/lib/generate";
+import { printFilm } from "@/lib/assemble";
 
-type Phase = "gate" | "interview" | "agent" | "proof";
+type Phase = "gate" | "interview" | "agent" | "proof" | "print";
 type VoiceState = "idle" | "loading" | "playing" | "error";
+type DeskState = { s: "wait" | "run" | "done" | "skip" | "error"; note?: string };
+
+const DESKS: { id: string; label: string }[] = [
+  { id: "narration", label: "The voice desk — eleven_v3 narration" },
+  { id: "frame", label: "The picture desk — the film frame" },
+  { id: "sfx", label: "The foley desk — sound-generation room tone" },
+  { id: "music", label: "The score desk — eleven music" },
+  { id: "print", label: "The print desk — ffmpeg.wasm mix & mp4" },
+];
+const DESKS_IDLE: Record<string, DeskState> = Object.fromEntries(
+  DESKS.map((d) => [d.id, { s: "wait" } as DeskState])
+);
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** rasterize the house-style SVG art into PNG bytes for the print desk */
+async function svgToPngBytes(svgEl: SVGSVGElement, w = 1280, h = 960): Promise<Uint8Array> {
+  const xml = new XMLSerializer().serializeToString(svgEl);
+  const img = new Image();
+  await new Promise((res, rej) => {
+    img.onload = res;
+    img.onerror = rej;
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#050505";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), "image/png"));
+  return new Uint8Array(await blob.arrayBuffer());
+}
 
 const QUESTIONS = [
   {
@@ -69,8 +113,13 @@ export default function Studio({ onClose }: { onClose: () => void }) {
   const [genError, setGenError] = useState("");
   const [voice, setVoice] = useState<VoiceState>("idle");
   const [voiceError, setVoiceError] = useState("");
+  const [desks, setDesks] = useState<Record<string, DeskState>>(DESKS_IDLE);
+  const [film, setFilm] = useState<string | null>(null);
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [ffLog, setFfLog] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -168,12 +217,12 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     setVoice("loading");
     setVoiceError("");
     try {
-      const url = await synthesize(
+      const asset = await synthesize(
         story.lines.map((l) => `${l.tag} ${l.text}`).join("\n"),
         settings
       );
       audioRef.current?.pause();
-      const audio = new Audio(url);
+      const audio = new Audio(asset.url);
       audioRef.current = audio;
       audio.onended = () => setVoice("idle");
       await audio.play();
@@ -183,6 +232,88 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       setVoice("error");
     }
   }, [settings, story, voice]);
+
+  /** the print run — every desk does its real job, then ffmpeg binds the edition */
+  const produce = useCallback(async () => {
+    if (!settings?.elevenKey || !story) return;
+    // rasterize the house art now, while the proof's SVG is still mounted
+    let artBytes: Uint8Array | null = null;
+    const svg = frameRef.current?.querySelector("svg");
+    if (svg) artBytes = await svgToPngBytes(svg as unknown as SVGSVGElement).catch(() => null);
+
+    setPhase("print");
+    setFilm(null);
+    setFrameUrl(null);
+    setFfLog("");
+    setDesks({ ...DESKS_IDLE });
+    const upd = (k: string, v: DeskState) => setDesks((p) => ({ ...p, [k]: v }));
+
+    try {
+      // 1 · narration first — its length times everything else
+      upd("narration", { s: "run" });
+      const narration = await synthesize(
+        story.lines.map((l) => `${l.tag} ${l.text}`).join("\n"),
+        settings
+      );
+      const dur = await audioDuration(narration.url).catch(() => 30);
+      upd("narration", { s: "done", note: `${dur.toFixed(1)}s · ${settings.elevenModel}` });
+
+      // 2 · the frame — Gemini draws it, or the house art steps in
+      upd("frame", { s: "run" });
+      let frameBytes = artBytes;
+      if (settings.imageSource === "ai" && story.image_prompt) {
+        try {
+          const img = await generateImage(story.image_prompt, settings);
+          frameBytes = img.bytes;
+          setFrameUrl(img.url);
+          upd("frame", { s: "done", note: settings.geminiImageModel });
+        } catch (e) {
+          upd("frame", { s: "error", note: `${errMsg(e)} — using house art` });
+        }
+      } else {
+        upd("frame", { s: "done", note: "house style" });
+      }
+      if (!frameBytes) throw new Error("no frame available");
+
+      // 3 · room tone
+      let sfx: Asset | null = null;
+      upd("sfx", { s: "run" });
+      if (story.sfx_prompt) {
+        try {
+          sfx = await makeSfx(story.sfx_prompt, Math.min(dur, 22), settings);
+          upd("sfx", { s: "done" });
+        } catch (e) {
+          upd("sfx", { s: "skip", note: errMsg(e) });
+        }
+      } else upd("sfx", { s: "skip", note: "no prompt from the director" });
+
+      // 4 · score
+      let music: Asset | null = null;
+      upd("music", { s: "run" });
+      if (story.music_prompt) {
+        try {
+          music = await makeMusic(story.music_prompt, (dur + 2) * 1000, settings);
+          upd("music", { s: "done" });
+        } catch (e) {
+          upd("music", { s: "skip", note: errMsg(e) });
+        }
+      } else upd("music", { s: "skip", note: "no prompt from the director" });
+
+      // 5 · print
+      upd("print", { s: "run" });
+      const url = await printFilm({
+        frame: frameBytes,
+        narration: narration.bytes,
+        music: music?.bytes ?? null,
+        sfx: sfx?.bytes ?? null,
+        onLog: (l) => setFfLog(l),
+      });
+      upd("print", { s: "done" });
+      setFilm(url);
+    } catch (e) {
+      upd("print", { s: "error", note: errMsg(e) });
+    }
+  }, [settings, story]);
 
   const fragments = useMemo(
     () =>
@@ -421,10 +552,12 @@ export default function Studio({ onClose }: { onClose: () => void }) {
             </h2>
 
             <div className="mt-12 grid gap-10 md:grid-cols-2">
-              <div className="border-4 border-black">
+              <div ref={frameRef} className="border-4 border-black">
                 <MomentArt id="onemore" className="block aspect-[4/3] w-full" />
                 <p className="border-t-4 border-black px-3 py-2 text-[0.6rem] font-bold uppercase tracking-[0.18em]">
-                  frame 6/6 · gemini image generation — coming to the studio next
+                  {settings?.imageSource === "ai"
+                    ? `frame · ${settings.geminiImageModel} draws it at print time`
+                    : "frame · house style — switch to AI in the press room"}
                 </p>
               </div>
 
@@ -448,11 +581,19 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <div className="mt-10 flex flex-wrap gap-4">
+                  {hasVoice && (
+                    <button
+                      onClick={produce}
+                      className="display bg-black px-6 py-3 text-2xl text-white transition-colors hover:bg-white hover:text-black hover:outline hover:outline-4 hover:outline-black"
+                    >
+                      🖨 Print the film
+                    </button>
+                  )}
                   {hasVoice ? (
                     <button
                       onClick={hear}
                       disabled={voice === "loading"}
-                      className="display bg-black px-6 py-3 text-2xl text-white transition-colors hover:bg-white hover:text-black hover:outline hover:outline-4 hover:outline-black disabled:opacity-60"
+                      className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white disabled:opacity-60"
                     >
                       {voice === "loading"
                         ? "… casting the voice"
@@ -504,6 +645,105 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ——— phase 4 · the print run ——— */}
+      {phase === "print" && story && (
+        <div className="min-h-[calc(100svh-64px)] bg-black px-5 py-14 text-white md:px-10">
+          <div className="mx-auto w-full max-w-5xl">
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-white/50">
+              the print run · one more year of {story.headline}
+            </p>
+
+            {!film ? (
+              <>
+                <h2 className="display slam-wrap mt-6 text-5xl sm:text-7xl">
+                  <span className="slam is-in">Five desks, one edition.</span>
+                </h2>
+                <div className="mt-10 border-2 border-white/40 p-5 font-mono text-sm leading-relaxed md:p-7">
+                  {DESKS.map((d) => {
+                    const st = desks[d.id];
+                    return (
+                      <p key={d.id} className="mt-3 flex items-baseline gap-3 first:mt-0">
+                        <span className={st.s === "run" ? "animate-pulse" : ""}>
+                          {st.s === "wait" && "·"}
+                          {st.s === "run" && "█"}
+                          {st.s === "done" && "✓"}
+                          {st.s === "skip" && "—"}
+                          {st.s === "error" && "!"}
+                        </span>
+                        <span className={st.s === "wait" ? "text-white/40" : "text-white"}>
+                          {d.label}
+                          {st.note && <span className="text-white/50"> · {st.note}</span>}
+                        </span>
+                      </p>
+                    );
+                  })}
+                  {desks.print.s === "run" && ffLog && (
+                    <p className="mt-5 truncate text-[0.7rem] text-white/40">{ffLog}</p>
+                  )}
+                  {desks.print.s === "error" && (
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <button
+                        onClick={produce}
+                        className="display border-2 border-white px-5 py-2 text-xl transition-colors hover:bg-white hover:text-black"
+                      >
+                        ↻ Run the presses again
+                      </button>
+                      <button
+                        onClick={() => setPhase("proof")}
+                        className="display border-2 border-white/50 px-5 py-2 text-xl text-white/70 transition-colors hover:border-white hover:bg-white hover:text-black"
+                      >
+                        ← Back to the proof
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-4 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
+                  everything runs in your browser — narration and score from elevenlabs, the frame
+                  from gemini, the mix and mp4 from ffmpeg.wasm
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="display slam-wrap mt-6 text-5xl sm:text-7xl">
+                  <span className="slam is-in">Hot off the press.</span>
+                </h2>
+                <div className="mt-10 border-4 border-white">
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <video src={film} controls autoPlay className="block w-full" />
+                </div>
+                <div className="mt-8 flex flex-wrap gap-4">
+                  <a
+                    href={film}
+                    download={`one-more-year-of-${story.headline.replace(/\s+/g, "-")}.mp4`}
+                    className="display bg-white px-6 py-3 text-2xl text-black transition-colors hover:bg-black hover:text-white hover:outline hover:outline-4 hover:outline-white"
+                  >
+                    ↓ Keep your film
+                  </a>
+                  <button
+                    onClick={() => setPhase("proof")}
+                    className="display border-4 border-white px-6 py-3 text-2xl transition-colors hover:bg-white hover:text-black"
+                  >
+                    ← Back to the proof
+                  </button>
+                  <button
+                    onClick={produce}
+                    className="display border-4 border-white/50 px-6 py-3 text-2xl text-white/70 transition-colors hover:border-white hover:bg-white hover:text-black"
+                  >
+                    ↻ Reprint
+                  </button>
+                </div>
+                {frameUrl && (
+                  <p className="mt-6 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
+                    frame drawn by {settings?.geminiImageModel} · narration &amp; score by
+                    elevenlabs · printed by ffmpeg.wasm in your browser
+                  </p>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

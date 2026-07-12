@@ -20,8 +20,10 @@ The featured demo tells the story of **Danny Moreau, №9** — a flat ball, a t
 The featured Danny Moreau story is mocked content (script in `lib/story.ts`, WebAudio ambience in `lib/ambience.ts`). But the **Studio** — the "Start your story" flow — runs for real when you connect keys:
 
 - **⚙ The Press Room** (settings, top of the page) stores your API keys in your browser's localStorage only; nothing touches a server.
-- **Gemini** (`generateContent` with JSON structured output, default `gemini-2.5-flash`) reads your four interview answers and writes your story live — headline plus an audio-tagged script (`lib/generate.ts`).
-- **ElevenLabs** (`eleven_v3` with [audio tags], any voice from your library) speaks the finished proof aloud from the same screen.
+- **Gemini — the director** (`generateContent` with JSON structured output, default `gemini-2.5-flash`) reads your four interview answers and writes the full production plan live: headline, audio-tagged script, and prompts for the image, sound-effects, and music desks (`lib/generate.ts`).
+- **Gemini — the picture desk** (`gemini-2.5-flash-image`) draws your film frame at print time, or switch to the house procedural art in settings.
+- **ElevenLabs — the voice, foley & score desks**: `eleven_v3` narration with [audio tags], `/v1/sound-generation` room tone, and the Music API score.
+- **ffmpeg.wasm — the print desk**: mixes narration, score, and room tone and prints frame + audio into a downloadable mp4, entirely in your browser (`lib/assemble.ts`; core served from `public/ffmpeg/`).
 
 The Studio requires a Gemini key to begin — without one it opens on a setup gate that walks you through connecting the crew. There is no canned output: every story it produces is written live.
 
