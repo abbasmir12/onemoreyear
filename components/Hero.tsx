@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import Studio from "./Studio";
+import SettingsPanel from "./Settings";
 
 export default function Hero() {
   const nineRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const [studio, setStudio] = useState(false);
+  const [settings, setSettings] = useState(false);
 
   useEffect(() => {
     let raf = 0;
@@ -44,9 +46,18 @@ export default function Hero() {
           <span className="outline-text">One</span> <span>More</span>{" "}
           <span className="bg-black px-2 text-white">Year</span>
         </p>
-        <p className="hidden pb-1 text-[0.6rem] font-bold uppercase tracking-[0.25em] sm:block">
-          The back page of a life · July 2026
-        </p>
+        <div className="flex items-center gap-5 pb-1">
+          <p className="hidden text-[0.6rem] font-bold uppercase tracking-[0.25em] sm:block">
+            The back page of a life · July 2026
+          </p>
+          <button
+            onClick={() => setSettings(true)}
+            className="text-[0.6rem] font-bold uppercase tracking-[0.25em] transition-colors hover:bg-black hover:text-white px-2 py-1"
+            aria-label="Open settings"
+          >
+            ⚙ press room
+          </button>
+        </div>
       </div>
 
       <div className="relative flex flex-1 flex-col justify-center px-5 py-16 md:px-10">
@@ -103,6 +114,7 @@ export default function Hero() {
       </div>
 
       {studio && <Studio onClose={() => setStudio(false)} />}
+      {settings && <SettingsPanel onClose={() => setSettings(false)} />}
     </section>
   );
 }

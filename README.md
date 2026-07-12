@@ -15,14 +15,15 @@ One More Year transforms a person's passion journey into a living cinematic memo
 
 The featured demo tells the story of **Danny Moreau, №9** — a flat ball, a torn knee, and a man who could not stop.
 
-## Status: frontend prototype
+## Status: working prototype with live AI integrations
 
-This is the complete experience design with mocked content. The AI generation pipeline is not wired yet:
+The featured Danny Moreau story is mocked content (script in `lib/story.ts`, WebAudio ambience in `lib/ambience.ts`). But the **Studio** — the "Start your story" flow — runs for real when you connect keys:
 
-- The story script, timings, and world design in `lib/story.ts` stand in for **Gemini** output.
-- The ambient atmosphere is synthesized live with WebAudio (`lib/ambience.ts`) as a placeholder for **ElevenLabs** narration, sound design, and music.
+- **⚙ The Press Room** (settings, top of the page) stores your API keys in your browser's localStorage only; nothing touches a server.
+- **Gemini** (`generateContent` with JSON structured output, default `gemini-2.5-flash`) reads your four interview answers and writes your story live — headline plus an audio-tagged script (`lib/generate.ts`).
+- **ElevenLabs** (`eleven_v3` with [audio tags], any voice from your library) speaks the finished proof aloud from the same screen.
 
-The generation pipeline drops in behind the exact interface in this prototype — nothing about the experience changes except that the story becomes yours.
+Without keys, the Studio runs an honest simulation of the same pipeline, labeled as such.
 
 ## Run it
 
