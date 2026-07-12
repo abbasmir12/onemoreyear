@@ -20,9 +20,9 @@ const caveat = Caveat({
 });
 
 export const metadata: Metadata = {
-  title: "One More Year — the back page of a life",
+  title: "One More Year — open-source documentary studio",
   description:
-    "Give us the fragments of something you love. Gemini finds the story. ElevenLabs gives it a voice. One More Year prints the back page of your life.",
+    "An open-source documentary studio for the thing you cannot quit. Gemini directs; ElevenLabs performs the house cast.",
 };
 
 export default function RootLayout({

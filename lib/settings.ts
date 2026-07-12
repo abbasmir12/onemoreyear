@@ -1,13 +1,9 @@
+import { DEFAULT_NARRATOR_ID } from "./voices";
+
 export type Settings = {
-  /** OpenRouter (OpenAI-compatible) — preferred provider when set */
-  openrouterKey: string;
-  openrouterModel: string;
-  openrouterImageModel: string;
-  /** Google direct — used when no OpenRouter key */
   geminiKey: string;
   geminiModel: string;
   geminiImageModel: string;
-  elevenKey: string;
   elevenModel: string;
   elevenVoiceId: string;
   /** film frame source */
@@ -15,17 +11,13 @@ export type Settings = {
 };
 
 export const DEFAULTS: Settings = {
-  openrouterKey: "",
-  openrouterModel: "google/gemini-2.5-flash",
-  openrouterImageModel: "google/gemini-2.5-flash-image",
   geminiKey: "",
   geminiModel: "gemini-2.5-flash",
   geminiImageModel: "gemini-2.5-flash-image",
-  elevenKey: "",
   elevenModel: "eleven_v3",
-  // "George" — a low, warm premade ElevenLabs voice (the narrator)
-  elevenVoiceId: "JBFqnCBsd6RMkjVDRZzb",
-  imageSource: "ai",
+  // The deep house voice — every selectable voice comes from our curated allowlist.
+  elevenVoiceId: DEFAULT_NARRATOR_ID,
+  imageSource: "stock",
 };
 
 const KEY = "onemoreyear.settings";
@@ -44,4 +36,4 @@ export function saveSettings(s: Settings) {
 }
 
 /** can the director work? either provider will do */
-export const hasDirector = (s: Settings | null) => !!(s?.openrouterKey || s?.geminiKey);
+export const hasDirector = (s: Settings | null) => !!s?.geminiKey;

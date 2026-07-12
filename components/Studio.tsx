@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MomentArt from "./MomentArt";
-import Theater from "./Theater";
 import SettingsPanel from "./Settings";
 import { loadSettings, hasDirector, type Settings } from "@/lib/settings";
 import {
@@ -14,6 +13,7 @@ import {
   makeMusic,
   audioDuration,
   castVoices,
+  performanceScript,
   VOICE_POOL,
   type DocumentaryPlan,
   type Asset,
@@ -23,6 +23,7 @@ import { printDocumentary } from "@/lib/assemble";
 type Phase = "gate" | "interview" | "agent" | "proof" | "print";
 type VoiceState = "idle" | "loading" | "playing" | "error";
 type DeskState = { s: "wait" | "run" | "done" | "skip" | "error"; note?: string };
+type ElevenStatus = { ready: boolean; tier?: string; used?: number; limit?: number; remaining?: number; error?: string };
 
 const QUESTIONS = [
   {
@@ -89,15 +90,82 @@ async function svgToPngBytes(svgEl: SVGSVGElement, w = 1280, h = 960): Promise<U
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+async function mapLimit<T, R>(items: T[], limit: number, work: (item: T, index: number) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await work(items[index], index);
+    }
+  }));
+  return results;
+}
+
+function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const words = text.split(/\s+/); const lines: string[] = []; let line = "";
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** the kind of voice this is — a documentary lower-third, not a queue position */
+function castKicker(speakerId: string): string {
+  if (speakerId === "narrator") return "NARRATION";
+  if (speakerId === "subject") return "IN THEIR OWN WORDS";
+  return "AN INTERIOR VOICE";
+}
+
+/** the director's performance note for this line — a real, dynamic detail */
+function performanceNote(segment: DocumentaryPlan["segments"][number]): string {
+  const bare = segment.tag.replace(/[[\]]/g, "").trim();
+  return bare ? bare.toUpperCase() : "SPOKEN";
+}
+
+/** Turn every raw photograph into a unique newspaper/documentary frame. */
+async function documentaryCard(
+  bytes: Uint8Array,
+  segment: DocumentaryPlan["segments"][number],
+  role: string,
+  index: number,
+  count: number,
+  headline: string
+) {
+  const blob = new Blob([bytes.slice()], { type: "image/jpeg" });
+  const url = URL.createObjectURL(blob); const image = new Image();
+  await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error("frame decode failed")); image.src = url; });
+  const canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
+  const ctx = canvas.getContext("2d")!; ctx.fillStyle = "#050505"; ctx.fillRect(0, 0, 1280, 720);
+  const photoW = 790; const scale = Math.max(photoW / image.width, 720 / image.height);
+  const dw = image.width * scale, dh = image.height * scale;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, photoW, 720); ctx.clip(); ctx.filter = "grayscale(1) contrast(1.16)"; ctx.drawImage(image, (photoW - dw) / 2, (720 - dh) / 2, dw, dh); ctx.restore();
+  const gradient = ctx.createLinearGradient(430, 0, 800, 0); gradient.addColorStop(0, "rgba(5,5,5,0)"); gradient.addColorStop(1, "#050505"); ctx.fillStyle = gradient; ctx.fillRect(430, 0, 370, 720);
+  ctx.fillStyle = "#f4f1e8"; ctx.fillRect(790, 0, 490, 720);
+  ctx.fillStyle = "#050505"; ctx.font = "700 24px Georgia, serif"; ctx.fillText(role.toUpperCase(), 835, 60);
+  ctx.font = "italic 14px Georgia, serif"; ctx.fillText(castKicker(segment.speaker), 835, 82);
+  ctx.fillRect(835, 96, 390, 4);
+  ctx.font = "700 13px monospace"; ctx.fillText(`${headline.toUpperCase()} · PART ${index + 1} OF ${count}`, 835, 128);
+  ctx.font = "700 36px Georgia, serif"; const lines = wrap(ctx, segment.text, 380).slice(0, 8); lines.forEach((line, i) => ctx.fillText(line, 835, 205 + i * 48));
+  ctx.fillStyle = "#050505"; ctx.fillRect(835, 622, 142, 38); ctx.fillStyle = "#fff"; ctx.font = "700 12px monospace"; ctx.fillText(performanceNote(segment), 854, 646);
+  ctx.strokeStyle = "#050505"; ctx.lineWidth = 2; ctx.strokeRect(992, 622, 188, 38); ctx.fillStyle = "#050505"; ctx.fillText(segment.em ? "THE LAST WORD" : "ON THE RECORD", 1008, 646);
+  URL.revokeObjectURL(url);
+  const output = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("frame render failed")), "image/png"));
+  return new Uint8Array(await output.arrayBuffer());
+}
+
 export default function Studio({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<Phase>("gate");
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [step, setStep] = useState(0);
-  const [theater, setTheater] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [elevenStatus, setElevenStatus] = useState<ElevenStatus>({ ready: false });
   const [plan, setPlan] = useState<DocumentaryPlan | null>(null);
   const [genState, setGenState] = useState<"pending" | "done" | "error">("pending");
   const [genError, setGenError] = useState("");
@@ -110,21 +178,28 @@ export default function Studio({ onClose }: { onClose: () => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  const generatedFramesRef = useRef<Uint8Array[] | null>(null);
 
   useEffect(() => {
-    setSettings(loadSettings());
+    const id = setTimeout(() => setSettings(loadSettings()), 0);
+    return () => clearTimeout(id);
   }, [settingsOpen]);
 
+  useEffect(() => {
+    fetch("/api/elevenlabs/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((status: ElevenStatus) => setElevenStatus(status))
+      .catch(() => setElevenStatus({ ready: false, error: "preflight unavailable" }));
+  }, []);
+
   const ready = hasDirector(settings);
-  const hasVoice = !!settings?.elevenKey;
-  const providerName = settings?.openrouterKey
-    ? `openrouter · ${settings.openrouterModel}`
-    : settings?.geminiKey
-      ? settings.geminiModel
-      : "";
+  const hasVoice = elevenStatus.ready;
 
   useEffect(() => {
-    if (phase === "gate" && ready) setPhase("interview");
+    if (phase === "gate" && ready) {
+      const id = setTimeout(() => setPhase("interview"), 0);
+      return () => clearTimeout(id);
+    }
   }, [phase, ready]);
 
   useEffect(
@@ -148,11 +223,11 @@ export default function Studio({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !theater && !settingsOpen) onClose();
+      if (e.key === "Escape" && !settingsOpen) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, theater, settingsOpen]);
+  }, [onClose, settingsOpen]);
 
   // agent steps advance on a clock; the proof waits for the director
   useEffect(() => {
@@ -172,6 +247,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       setPhase("agent");
       setStep(0);
       setPlan(null);
+      generatedFramesRef.current = null;
       setGenError("");
       setGenState("pending");
       directDocumentary(finalAnswers, settings)
@@ -206,7 +282,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
 
   /** preview: the cold open, in the subject's cast voice */
   const preview = useCallback(async () => {
-    if (!settings?.elevenKey || !plan) return;
+    if (!hasVoice || !settings || !plan) return;
     if (voice === "playing") {
       audioRef.current?.pause();
       setVoice("idle");
@@ -216,7 +292,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     setVoiceError("");
     try {
       const seg = plan.segments[0];
-      const asset = await synthesize(`${seg.tag} ${seg.text}`, voices[seg.speaker], settings);
+      const asset = await synthesize(performanceScript(seg), voices[seg.speaker], settings);
       audioRef.current?.pause();
       const audio = new Audio(asset.url);
       audioRef.current = audio;
@@ -227,11 +303,11 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       setVoiceError(errMsg(e));
       setVoice("error");
     }
-  }, [settings, plan, voices, voice]);
+  }, [settings, plan, voices, voice, hasVoice]);
 
   /** the print run — every desk does its real job, then ffmpeg binds the edition */
   const produce = useCallback(async () => {
-    if (!settings?.elevenKey || !plan) return;
+    if (!hasVoice || !settings || !plan) return;
     let artBytes: Uint8Array | null = null;
     const svg = frameRef.current?.querySelector("svg");
     if (svg) artBytes = await svgToPngBytes(svg as unknown as SVGSVGElement).catch(() => null);
@@ -245,62 +321,80 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     try {
       const segs = plan.segments;
 
-      // 1 · the cast records, one talking head at a time
-      const audios: { bytes: Uint8Array; duration: number }[] = [];
-      for (let i = 0; i < segs.length; i++) {
-        upd("voices", { s: "run", note: `segment ${i + 1}/${segs.length}` });
-        const a = await synthesize(`${segs[i].tag} ${segs[i].text}`, voices[segs[i].speaker], settings);
-        const d = await audioDuration(a.url).catch(() => 6);
-        audios.push({ bytes: a.bytes, duration: d });
-      }
-      const total = audios.reduce((s, a) => s + a.duration, 0);
-      upd("voices", { s: "done", note: `${segs.length} voices · ${total.toFixed(0)}s` });
+      // Voice and picture desks run together. Voice concurrency is capped at
+      // five to keep the ensemble fast without an unbounded API burst.
+      const voiceWork = mapLimit(segs, 2, async (segment, i) => {
+        upd("voices", { s: "run", note: `recording ${Math.min(i + 1, segs.length)}/${segs.length} · safe Starter queue` });
+        const asset = await synthesize(performanceScript(segment), voices[segment.speaker], settings);
+        return { bytes: asset.bytes, duration: await audioDuration(asset.url).catch(() => 6) };
+      }).catch((error) => { throw new Error(`VOICE_DESK:${errMsg(error)}`); });
 
-      // 2 · one frame per scene
-      const frames: Uint8Array[] = [];
       const uploadBytes: Uint8Array[] = await Promise.all(
         uploads.map(async (f) => new Uint8Array(await f.arrayBuffer()))
       );
       let framesNote: string = settings.imageSource;
-      for (let i = 0; i < segs.length; i++) {
-        upd("frames", { s: "run", note: `scene ${i + 1}/${segs.length} · ${settings.imageSource}` });
+      const frameWork = generatedFramesRef.current?.length === segs.length
+        ? Promise.resolve(generatedFramesRef.current.map((frame) => frame.slice()))
+        : mapLimit(segs, 4, async (segment, i) => {
+        upd("frames", { s: "run", note: `scene ${i + 1}/${segs.length} · 4 in parallel · ${settings.imageSource}` });
         let bytes: Uint8Array | null = null;
         try {
-          if (settings.imageSource === "ai") bytes = (await generateFrame(segs[i].scene, settings)).bytes;
-          else if (settings.imageSource === "stock") bytes = (await stockFrame(segs[i].scene)).bytes;
+          if (settings.imageSource === "ai") bytes = (await generateFrame(segment.scene, settings)).bytes;
+          else if (settings.imageSource === "stock") bytes = (await stockFrame(segment.footage_query || segment.scene)).bytes;
           else if (settings.imageSource === "upload" && uploadBytes.length)
             bytes = uploadBytes[i % uploadBytes.length];
         } catch {
-          framesNote = `${settings.imageSource}, some fell back to house art`;
+          if (settings.imageSource === "ai") {
+            try {
+              bytes = (await stockFrame(segment.footage_query || segment.scene)).bytes;
+              framesNote = "AI with AssetPipe fallback";
+            } catch {
+              framesNote = "AI/AssetPipe unavailable, some fell back to house art";
+            }
+          } else framesNote = `${settings.imageSource}, some fell back to house art`;
         }
-        frames.push(bytes ?? artBytes ?? new Uint8Array());
-      }
+        const raw = (bytes ?? artBytes ?? new Uint8Array()).slice();
+        if (!raw.length) return raw;
+        const role = plan.cast.find((member) => member.id === segment.speaker)?.role ?? segment.speaker;
+        return documentaryCard(raw, segment, role, i, segs.length, plan.headline);
+      });
+
+      const [audios, frames] = await Promise.all([voiceWork, frameWork]);
+      const leadIns = segs.map((segment) => segment.transition.duration_seconds);
+      const total = audios.reduce((sum, audio, i) => sum + leadIns[i] + audio.duration, 0);
+      upd("voices", { s: "done", note: `${plan.cast.length} voices · ${segs.length} performances · ${total.toFixed(0)}s with breath` });
       if (frames.some((f) => f.length === 0)) throw new Error("no frames available");
-      upd("frames", { s: "done", note: framesNote });
+      generatedFramesRef.current = frames.map((frame) => frame.slice());
+      upd("frames", { s: "done", note: `${frames.length} editorial frames · ${framesNote}` });
 
-      // 3 · room tone
-      let sfx: Asset | null = null;
-      upd("sfx", { s: "run" });
-      if (plan.sfx_prompt) {
+      // Foley regions and score run together after the spoken duration is known.
+      const soundScenes = segs.map((segment, index) => ({ segment, index })).filter(({ segment }) => segment.transition.mode === "sound");
+      upd("sfx", { s: "run", note: `${soundScenes.length} director-selected sound beats` }); upd("music", { s: "run" });
+      // Music occupies one paid-provider slot, so Foley uses one serial slot;
+      // together they remain below Starter's concurrency limit of three.
+      const sfxWork = mapLimit(soundScenes, 1, async ({ segment, index }) => {
         try {
-          sfx = await makeSfx(plan.sfx_prompt, Math.min(total, 22), settings);
-          upd("sfx", { s: "done" });
-        } catch (e) {
-          upd("sfx", { s: "skip", note: errMsg(e) });
-        }
-      } else upd("sfx", { s: "skip", note: "no prompt from the director" });
-
-      // 4 · score
-      let music: Asset | null = null;
-      upd("music", { s: "run" });
-      if (plan.music_prompt) {
-        try {
-          music = await makeMusic(plan.music_prompt, (total + 2) * 1000, settings);
-          upd("music", { s: "done" });
-        } catch (e) {
-          upd("music", { s: "skip", note: errMsg(e) });
-        }
-      } else upd("music", { s: "skip", note: "no prompt from the director" });
+          const transition = segment.transition;
+          const asset = await makeSfx(transition.prompt, transition.duration_seconds, settings);
+          const start = audios.slice(0, index).reduce((sum, audio, i) => sum + leadIns[i] + audio.duration, 0);
+          return { audio: asset.bytes, start, gain: transition.gain, duration: transition.duration_seconds };
+        } catch { return null; }
+      }).then((items) => items.filter((item): item is NonNullable<typeof item> => !!item));
+      // every film gets a score — coerce a "none" call from the director
+      // rather than trust it, since a missing score reads as broken, not restrained
+      const musicMode = plan.music_mode === "none" ? "instrumental" : plan.music_mode;
+      const musicPrompt =
+        plan.music_prompt ||
+        `a restrained instrumental score for a short documentary about ${plan.headline}, sparse, cinematic, minor key, no vocals`;
+      const musicWork: Promise<Asset | null> = makeMusic(
+        musicPrompt,
+        (total + 2) * 1000,
+        musicMode,
+        settings
+      ).catch(() => null);
+      const [sfx, music] = await Promise.all([sfxWork, musicWork]);
+      upd("sfx", sfx.length ? { s: "done", note: `${sfx.length} sound-first scene transitions` } : { s: "skip", note: "sound generation unavailable" });
+      upd("music", music ? { s: "done", note: `${musicMode} · ${plan.music_rationale}` } : { s: "skip", note: "the score desk didn't answer" });
 
       // 5 · print
       upd("print", { s: "run" });
@@ -309,17 +403,20 @@ export default function Studio({ onClose }: { onClose: () => void }) {
           audio: audios[i].bytes,
           frame: frames[i],
           duration: audios[i].duration,
+          leadIn: leadIns[i],
         })),
-        music: music?.bytes ?? null,
-        sfx: sfx?.bytes ?? null,
+        music: music ? { audio: music.bytes, start: plan.music_entry_seconds, gain: 0.22 } : null,
+        sfx,
         onLog: (l) => setFfLog(l),
       });
       upd("print", { s: "done" });
       setFilm(url);
     } catch (e) {
-      upd("print", { s: "error", note: errMsg(e) });
+      const message = errMsg(e);
+      if (message.startsWith("VOICE_DESK:")) upd("voices", { s: "error", note: message.slice(11) });
+      else upd("print", { s: "error", note: message });
     }
-  }, [settings, plan, voices, uploads]);
+  }, [settings, plan, voices, uploads, hasVoice]);
 
   const fragments = useMemo(
     () =>
@@ -378,13 +475,13 @@ export default function Studio({ onClose }: { onClose: () => void }) {
             </h2>
             <p className="mt-8 max-w-lg text-sm leading-relaxed md:text-base">
               Your documentary is written live, voiced by a real cast, and printed to film — nothing
-              canned. Connect your keys once and they stay in this browser&rsquo;s localStorage.
-              They never touch a server.
+              canned. Connect the director in this browser; the paid ElevenLabs key stays in the
+              server environment and is checked before a single credit is spent.
             </p>
 
             <div className="mt-10 max-w-lg space-y-3 font-mono text-sm">
               <p className="flex items-center justify-between border-2 border-black px-4 py-3">
-                <span>OpenRouter or Gemini key — the director</span>
+                <span>Gemini key — the director</span>
                 <span className={ready ? "" : "bg-black px-2 py-0.5 text-white"}>
                   {ready ? "✓ connected" : "required"}
                 </span>
@@ -392,7 +489,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               <p className="flex items-center justify-between border-2 border-black/40 px-4 py-3">
                 <span>ElevenLabs key — the cast, tone &amp; score</span>
                 <span className={hasVoice ? "" : "text-black/50"}>
-                  {hasVoice ? "✓ connected" : "for the film"}
+                  {hasVoice ? `✓ ${elevenStatus.tier ?? "connected"} · ${elevenStatus.remaining ?? "?"} credits left` : "set ELEVENLABS_API_KEY"}
                 </span>
               </p>
             </div>
@@ -404,7 +501,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               ⚙ Open the press room
             </button>
             <p className="mt-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-black/50">
-              keys: openrouter.ai · aistudio.google.com · elevenlabs.io
+              keys: aistudio.google.com · elevenlabs.io
             </p>
           </div>
         </div>
@@ -463,68 +560,110 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       {/* ——— phase 2 · the director at work ——— */}
       {phase === "agent" && (
         <div className="min-h-[calc(100svh-64px)] bg-black px-5 py-14 text-white md:px-10">
-          <div className="mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[1fr_1.6fr]">
+          <div className="mx-auto w-full max-w-6xl">
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-white/50">
+              job nº 0714 · the dark room
+            </p>
+            <h2 className="display slam-wrap mt-3 text-4xl sm:text-6xl">
+              <span className="slam is-in">The director is working.</span>
+            </h2>
+          </div>
+
+          <div className="mx-auto mt-10 grid w-full max-w-6xl gap-14 lg:grid-cols-[1fr_1.6fr]">
             <div>
               <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-white/50">
-                job nº 0714 · source fragments
+                source fragments
               </p>
-              <div className="mt-6 space-y-4">
-                {fragments.map((f) => (
-                  <div key={f.label} className="border-2 border-white/40 p-4">
-                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/50">
+              <div className="mt-6 space-y-8">
+                {fragments.map((f, i) => (
+                  <figure
+                    key={f.label}
+                    className="scrap p-5 pt-7"
+                    style={{ transform: `rotate(${((i * 41) % 5) - 2}deg)` }}
+                  >
+                    <span className="tape" aria-hidden />
+                    <figcaption className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-black/50">
                       {f.label}
-                    </p>
-                    <p
-                      className={`hand mt-1 text-2xl leading-tight ${f.real ? "" : "text-white/40"}`}
+                    </figcaption>
+                    <blockquote
+                      className={`hand mt-2 text-2xl leading-tight ${f.real ? "" : "text-black/35"}`}
                     >
                       “{f.text}”
-                    </p>
-                  </div>
+                    </blockquote>
+                  </figure>
                 ))}
               </div>
             </div>
 
             <div>
               <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-white/50">
-                the director is working — live
+                the wire copy — live
               </p>
-              <div className="mt-6 border-2 border-white/40 p-5 font-mono text-sm leading-relaxed md:p-7">
-                {STEPS.slice(0, Math.min(step + 1, STEPS.length)).map((s, i) => (
-                  <div key={i} className={`fade-up ${i > 0 ? "mt-5" : ""}`}>
-                    <p className="flex items-baseline gap-3">
-                      <span className={i < step ? "text-white" : "animate-pulse"}>
-                        {i < step ? "✓" : "█"}
-                      </span>
-                      <span className="text-white/60">{s.call}</span>
-                    </p>
-                    <p className="mt-1 pl-6 text-base text-white md:text-lg">{s.out}</p>
-                  </div>
-                ))}
-                {step >= STEPS.length && genState === "pending" && (
-                  <p className="fade-up mt-6 animate-pulse text-white/80">
-                    █ the director is writing — waiting…
+              <div
+                className="scrap relative mt-6 p-6 pt-9 md:p-9 md:pt-11"
+                style={{ transform: "rotate(0.6deg)", filter: "drop-shadow(10px 16px 22px rgba(0,0,0,0.55))" }}
+              >
+                <span className="tape" aria-hidden />
+                <div className="flex items-center justify-between">
+                  <p className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-black/50">
+                    draft — do not print
                   </p>
+                  {genState === "pending" && (
+                    <span className="flex items-center gap-2 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-black/50">
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-black" aria-hidden />
+                      writing
+                    </span>
+                  )}
+                </div>
+
+                {/* progress sprockets */}
+                <div className="mt-4 flex gap-1.5" aria-hidden>
+                  {STEPS.map((_, i) => (
+                    <span
+                      key={i}
+                      className={`h-1.5 flex-1 transition-colors duration-500 ${i <= step ? "bg-black" : "bg-black/15"}`}
+                    />
+                  ))}
+                </div>
+
+                <div className="mt-7 space-y-4">
+                  {STEPS.slice(0, Math.min(step + 1, STEPS.length)).map((s, i) => (
+                    <p
+                      key={i}
+                      className={`fade-up text-lg leading-snug md:text-xl ${
+                        i === step && genState !== "done"
+                          ? "bg-black px-2 py-1 font-bold text-white"
+                          : "text-black/55 line-through decoration-black/30"
+                      }`}
+                      style={{ fontFamily: "Georgia, serif" }}
+                    >
+                      {s.out}
+                    </p>
+                  ))}
+                </div>
+
+                {step >= STEPS.length && genState === "pending" && (
+                  <p className="hand fade-up mt-6 text-2xl text-black/60">still writing<span className="caret" /></p>
                 )}
                 {step >= STEPS.length && genState === "done" && (
-                  <p className="fade-up mt-6 bg-white px-2 py-1 font-bold text-black">
-                    ✓ script and cast ready — sending to the proof…
-                  </p>
+                  <span className="stamp fade-up mt-6 inline-block text-sm">approved — to press</span>
                 )}
                 {step >= STEPS.length && genState === "error" && (
                   <div className="fade-up mt-6">
-                    <p className="border-2 border-white bg-white px-3 py-2 font-bold text-black">
+                    <span className="stamp mb-3 inline-block text-sm">rejected — see notes</span>
+                    <p className="text-sm leading-relaxed text-black/70">
                       the director didn&rsquo;t answer — {genError}
                     </p>
                     <div className="mt-4 flex flex-wrap gap-3">
                       <button
                         onClick={() => startAgent(answers)}
-                        className="display border-2 border-white px-5 py-2 text-xl transition-colors hover:bg-white hover:text-black"
+                        className="display border-2 border-black px-5 py-2 text-xl transition-colors hover:bg-black hover:text-white"
                       >
                         ↻ Try again
                       </button>
                       <button
                         onClick={() => setSettingsOpen(true)}
-                        className="display border-2 border-white/50 px-5 py-2 text-xl text-white/70 transition-colors hover:border-white hover:bg-white hover:text-black"
+                        className="display border-2 border-black/40 px-5 py-2 text-xl text-black/70 transition-colors hover:border-black hover:bg-black hover:text-white"
                       >
                         ⚙ Check the press room
                       </button>
@@ -532,8 +671,8 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
               </div>
-              <p className="mt-4 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
-                live — your documentary is being written by {providerName} right now
+              <p className="mt-5 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
+                live — your documentary is being written by your ai director right now
               </p>
             </div>
           </div>
@@ -548,7 +687,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-black/50">
                 your documentary · first proof
               </p>
-              <span className="stamp text-xs">live · written by {providerName}</span>
+              <span className="stamp text-xs">an original film · not reused</span>
             </div>
 
             <h2 className="display mt-8 text-6xl leading-[0.9] sm:text-8xl">
@@ -565,7 +704,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
             {/* the cast */}
             <div className="mt-10 border-4 border-black">
               <p className="border-b-4 border-black px-4 py-2 text-[0.65rem] font-bold uppercase tracking-[0.2em]">
-                the cast · voices from elevenlabs
+                starring
               </p>
               <div className="grid sm:grid-cols-2 lg:grid-cols-4">
                 {plan.cast.map((c, i) => (
@@ -574,11 +713,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                     className={`px-4 py-3 ${i > 0 ? "border-t-2 border-black sm:border-t-0 sm:border-l-2" : ""}`}
                   >
                     <p className="display text-xl">{c.role}</p>
-                    <p className="mt-1 font-mono text-[0.7rem] text-black/60">
-                      wants: {c.voice}
-                      <br />
-                      cast: {voiceLabel(voices[c.id])}
-                    </p>
+                    <p className="hand mt-1 text-lg text-black/70">{voiceLabel(voices[c.id]).split(" — ")[0]}</p>
                   </div>
                 ))}
               </div>
@@ -676,6 +811,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                       setAnswers([]);
                       setStep(0);
                       setPlan(null);
+                      generatedFramesRef.current = null;
                       setGenState("pending");
                     }}
                     className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
@@ -685,8 +821,8 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 </div>
                 {voice === "error" && (
                   <p className="mt-4 border-2 border-black px-3 py-2 font-mono text-xs">
-                    the voice desk didn&rsquo;t answer ({voiceError}) — check your ElevenLabs key or
-                    try model eleven_multilingual_v2 in the press room (⚙).
+                    the voice desk didn&rsquo;t answer ({voiceError}) — check the server-side ElevenLabs
+                    key, its permissions, and available credits.
                   </p>
                 )}
               </div>
@@ -730,7 +866,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   {desks.print.s === "run" && ffLog && (
                     <p className="mt-5 truncate text-[0.7rem] text-white/40">{ffLog}</p>
                   )}
-                  {desks.print.s === "error" && (
+                  {Object.values(desks).some((desk) => desk.s === "error") && (
                     <div className="mt-5 flex flex-wrap gap-3">
                       <button
                         onClick={produce}
@@ -765,8 +901,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   <span className="slam is-in">Hot off the press.</span>
                 </h2>
                 <div className="mt-10 border-4 border-white">
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video src={film} controls autoPlay className="block w-full" />
+                    <video src={film} controls autoPlay className="block w-full" />
                 </div>
                 <div className="mt-8 flex flex-wrap gap-4">
                   <a
@@ -799,7 +934,6 @@ export default function Studio({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {theater && <Theater onClose={() => setTheater(false)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );

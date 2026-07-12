@@ -25,30 +25,41 @@ async function getFFmpeg(): Promise<FFmpeg> {
 
 export type Reel = {
   /** one entry per segment, in order */
-  segments: { audio: Uint8Array; frame: Uint8Array; duration: number }[];
-  music?: Uint8Array | null;
-  sfx?: Uint8Array | null;
+  segments: { audio: Uint8Array; frame: Uint8Array; duration: number; leadIn?: number }[];
+  music?: { audio: Uint8Array; start: number; gain: number } | null;
+  sfx?: { audio: Uint8Array; start: number; gain: number; duration: number }[];
   onLog?: (line: string) => void;
 };
 
 /** Returns an object URL for the finished mp4. */
-export async function printDocumentary({ segments, music, sfx, onLog }: Reel): Promise<string> {
+export async function printDocumentary({ segments, music, sfx = [], onLog }: Reel): Promise<string> {
   const ffmpeg = await getFFmpeg();
   const logger = ({ message }: { message: string }) => onLog?.(message);
   ffmpeg.on("log", logger);
   try {
     // write per-segment assets
     for (let i = 0; i < segments.length; i++) {
-      await ffmpeg.writeFile(`s${i}.mp3`, segments[i].audio);
-      await ffmpeg.writeFile(`f${i}.png`, segments[i].frame);
+      // writeFile may transfer/detach the supplied ArrayBuffer. Never hand the
+      // worker state-owned or cached buffers directly.
+      await ffmpeg.writeFile(`s${i}.mp3`, segments[i].audio.slice());
+      await ffmpeg.writeFile(`f${i}.png`, segments[i].frame.slice());
     }
-    if (music) await ffmpeg.writeFile("music.mp3", music);
-    if (sfx) await ffmpeg.writeFile("sfx.mp3", sfx);
+    if (music) await ffmpeg.writeFile("music.mp3", music.audio.slice());
+    for (let i = 0; i < sfx.length; i++) await ffmpeg.writeFile(`sfx${i}.mp3`, sfx[i].audio.slice());
 
-    // 1 · the spoken track: concat every voice segment
-    const audioList = segments.map((_, i) => `file 's${i}.mp3'`).join("\n");
-    await ffmpeg.writeFile("audio.txt", audioList);
-    await ffmpeg.exec(["-f", "concat", "-safe", "0", "-i", "audio.txt", "-c:a", "copy", "voice.mp3"]);
+    // 1 · spoken track: place performances on a timeline with deliberate
+    // inter-voice breathing room for Foley and room tone.
+    const voiceInputs = segments.flatMap((_, i) => ["-i", `s${i}.mp3`]);
+    let voiceCursor = 0;
+    const voiceChains = segments.map((segment, i) => {
+      voiceCursor += segment.leadIn ?? 0;
+      const start = voiceCursor;
+      voiceCursor += segment.duration;
+      const placed = Math.round(start * 1000);
+      return `[${i}:a]adelay=${placed}|${placed}[v${i}]`;
+    });
+    const voiceMix = `${voiceChains.join(";")};${segments.map((_, i) => `[v${i}]`).join("")}amix=inputs=${segments.length}:duration=longest:normalize=0,alimiter=limit=.95[voice]`;
+    await ffmpeg.exec([...voiceInputs, "-filter_complex", voiceMix, "-map", "[voice]", "voice.mp3"]);
 
     // 2 · the mix: voice leads, score and room tone under it
     const inputs = ["-i", "voice.mp3"];
@@ -57,35 +68,41 @@ export async function printDocumentary({ segments, music, sfx, onLog }: Reel): P
     let idx = 1;
     if (music) {
       inputs.push("-i", "music.mp3");
-      chains.push(`[${idx}:a]volume=0.22[m]`);
+      const musicDelay = Math.max(0, Math.round(music.start * 1000));
+      chains.push(`[${idx}:a]volume=${music.gain.toFixed(2)},afade=t=in:d=1.2,adelay=${musicDelay}|${musicDelay}[m]`);
       mixed.push("[m]");
       idx++;
     }
-    if (sfx) {
-      inputs.push("-i", "sfx.mp3");
-      chains.push(`[${idx}:a]volume=0.45,aloop=loop=-1:size=2e9[s]`);
-      mixed.push("[s]");
+    for (let i = 0; i < sfx.length; i++) {
+      inputs.push("-stream_loop", "-1", "-i", `sfx${i}.mp3`);
+      const startMs = Math.max(0, Math.round(sfx[i].start * 1000));
+      const fadeOutAt = Math.max(0.5, sfx[i].duration - 1.2);
+      chains.push(`[${idx}:a]atrim=0:${sfx[i].duration.toFixed(3)},afade=t=in:d=0.7,afade=t=out:st=${fadeOutAt.toFixed(3)}:d=1.2,volume=${sfx[i].gain.toFixed(2)},adelay=${startMs}|${startMs}[s${i}]`);
+      mixed.push(`[s${i}]`);
       idx++;
     }
+    // amix defaults to normalize=1, which silently divides every input's
+    // volume by the input count (up to 9 here: voice + music + 7 sfx) — the
+    // more sound effects the director adds, the quieter everything gets.
+    // Disable that, then apply a deliberate master boost with a limiter so
+    // voice, music, and sfx all rise together without clipping.
     const filter =
       (chains.length ? chains.join(";") + ";" : "") +
-      `${mixed.join("")}amix=inputs=${mixed.length}:duration=first:dropout_transition=2,` +
-      `afade=t=in:d=0.6[a]`;
+      `${mixed.join("")}amix=inputs=${mixed.length}:duration=first:dropout_transition=2:normalize=0,` +
+      `afade=t=in:d=0.6,volume=1.4,alimiter=limit=0.95[a]`;
     await ffmpeg.exec([...inputs, "-filter_complex", filter, "-map", "[a]", "mix.mp3"]);
 
-    // 3 · the picture: one frame per segment, held for its spoken length
-    const frameList =
-      "ffconcat version 1.0\n" +
-      segments.map((seg, i) => `file 'f${i}.png'\nduration ${Math.max(0.5, seg.duration).toFixed(3)}`).join("\n") +
-      `\nfile 'f${segments.length - 1}.png'\n`;
-    await ffmpeg.writeFile("frames.txt", frameList);
-
+    // 3 · picture: each card is an independent timed input. This avoids the
+    // concat-demuxer behavior that collapsed middle stills in some browsers.
+    const imageInputs = segments.flatMap((segment, i) => ["-loop", "1", "-t", Math.max(0.5, (segment.leadIn ?? 0) + segment.duration).toFixed(3), "-i", `f${i}.png`]);
+    const cards = segments.map((_, i) => `[${i}:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[c${i}]`);
+    const cardConcat = `${cards.join(";")};${segments.map((_, i) => `[c${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[video]`;
     await ffmpeg.exec([
-      "-f", "concat", "-safe", "0",
-      "-i", "frames.txt",
+      ...imageInputs,
       "-i", "mix.mp3",
-      "-vf",
-      "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=25",
+      "-filter_complex", cardConcat,
+      "-map", "[video]",
+      "-map", `${segments.length}:a`,
       "-c:v", "libx264",
       "-pix_fmt", "yuv420p",
       "-c:a", "aac",

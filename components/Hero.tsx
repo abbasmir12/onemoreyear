@@ -6,7 +6,7 @@ import SettingsPanel from "./Settings";
 
 export default function Hero() {
   const nineRef = useRef<HTMLSpanElement>(null);
-  const headRef = useRef<HTMLDivElement>(null);
+  const headlineRef = useRef<HTMLHeadingElement>(null);
   const [studio, setStudio] = useState(false);
   const [settings, setSettings] = useState(false);
 
@@ -19,8 +19,8 @@ export default function Hero() {
         if (nineRef.current) {
           nineRef.current.style.transform = `rotateY(${y * 0.25}deg) rotateZ(${-8 + y * 0.01}deg)`;
         }
-        if (headRef.current) {
-          headRef.current.style.transform = `translateY(${y * 0.28}px)`;
+        if (headlineRef.current) {
+          headlineRef.current.style.transform = `translateY(${y * 0.28}px)`;
         }
       });
     };
@@ -48,7 +48,7 @@ export default function Hero() {
         </p>
         <div className="flex items-center gap-5 pb-1">
           <p className="hidden text-[0.6rem] font-bold uppercase tracking-[0.25em] sm:block">
-            The back page of a life · July 2026
+            Open-source documentary studio · July 2026
           </p>
           <button
             onClick={() => setSettings(true)}
@@ -76,8 +76,13 @@ export default function Hero() {
           </span>
         </div>
 
-        <div ref={headRef} className="relative">
-          <h1 className="display text-[17vw] leading-[0.88] sm:text-[13vw] md:text-[10rem]">
+        <div className="relative">
+          {/* only the headline gets the scroll parallax — the CTA row stays
+              put so it never gets pushed toward the next section's overlap */}
+          <h1
+            ref={headlineRef}
+            className="display text-[17vw] leading-[0.88] sm:text-[13vw] md:text-[10rem]"
+          >
             Everyone
             <br />
             has one thing

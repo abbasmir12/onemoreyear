@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { loadSettings, saveSettings, DEFAULTS, type Settings } from "@/lib/settings";
+import { HOUSE_VOICES } from "@/lib/voices";
 
 const FIELDS: {
   key: Exclude<keyof Settings, "imageSource">;
@@ -11,60 +12,28 @@ const FIELDS: {
   secret?: boolean;
 }[] = [
   {
-    key: "openrouterKey",
-    label: "OpenRouter API key",
-    hint: "openrouter.ai → Keys. The preferred director: script and frames run through it when set.",
-    placeholder: "sk-or-…",
-    secret: true,
-  },
-  {
-    key: "openrouterModel",
-    label: "OpenRouter script model",
-    hint: "any chat model — writes the documentary",
-    placeholder: DEFAULTS.openrouterModel,
-  },
-  {
-    key: "openrouterImageModel",
-    label: "OpenRouter image model",
-    hint: "an image-output model (modalities: image) — draws the frames",
-    placeholder: DEFAULTS.openrouterImageModel,
-  },
-  {
     key: "geminiKey",
-    label: "Gemini API key (fallback)",
-    hint: "aistudio.google.com → Get API key. Used when no OpenRouter key is set.",
+    label: "Gemini API key",
+    hint: "aistudio.google.com → Get API key. Powers the director — writes your documentary live.",
     placeholder: "AIza…",
     secret: true,
   },
   {
     key: "geminiModel",
     label: "Gemini model",
-    hint: "any generateContent model",
+    hint: "any generateContent model — writes the script",
     placeholder: DEFAULTS.geminiModel,
   },
   {
     key: "geminiImageModel",
     label: "Gemini image model",
-    hint: "draws frames when Gemini is the provider",
+    hint: "draws the frames when the frame source is set to AI",
     placeholder: DEFAULTS.geminiImageModel,
-  },
-  {
-    key: "elevenKey",
-    label: "ElevenLabs API key",
-    hint: "elevenlabs.io → Profile → API keys. Voices the whole cast, plus room tone and score.",
-    placeholder: "sk_…",
-    secret: true,
-  },
-  {
-    key: "elevenModel",
-    label: "ElevenLabs model",
-    hint: "eleven_v3 reads [audio tags]; eleven_multilingual_v2 is a safe fallback",
-    placeholder: DEFAULTS.elevenModel,
   },
   {
     key: "elevenVoiceId",
     label: "Narrator voice ID",
-    hint: "the narrator's voice — the rest of the cast is drawn from a premade pool",
+    hint: "the narrator's voice — selected from the studio's curated house cast",
     placeholder: DEFAULTS.elevenVoiceId,
   },
 ];
@@ -77,12 +46,8 @@ const IMAGE_SOURCES: { v: Settings["imageSource"]; label: string }[] = [
 ];
 
 export default function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const [s, setS] = useState<Settings>(DEFAULTS);
+  const [s, setS] = useState<Settings>(() => loadSettings());
   const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    setS(loadSettings());
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -116,9 +81,9 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-7 px-6 py-7">
           <p className="text-xs leading-relaxed text-black/70">
-            The studio runs on your own keys. The director needs <b>OpenRouter or Gemini</b>;
-            ElevenLabs voices the cast. Keys are stored in{" "}
-            <b>this browser&rsquo;s localStorage only</b> — they never touch a server.
+            The studio runs on your own keys. The director needs a <b>Gemini</b> key; ElevenLabs
+            voices the cast. Its paid key is read from the server&rsquo;s
+            <code> ELEVENLABS_API_KEY</code> environment variable and is never sent to the browser.
           </p>
 
           {FIELDS.map((f) => (
@@ -129,16 +94,31 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
               >
                 {f.label}
               </label>
-              <input
-                id={`set-${f.key}`}
-                type={f.secret ? "password" : "text"}
-                value={s[f.key]}
-                onChange={(e) => setS({ ...s, [f.key]: e.target.value })}
-                placeholder={f.placeholder}
-                autoComplete="off"
-                spellCheck={false}
-                className="mt-2 w-full border-2 border-black/30 bg-transparent px-3 py-2 font-mono text-sm outline-none transition-colors focus:border-black"
-              />
+              {f.key === "elevenVoiceId" ? (
+                <select
+                  id={`set-${f.key}`}
+                  value={s.elevenVoiceId}
+                  onChange={(e) => setS({ ...s, elevenVoiceId: e.target.value })}
+                  className="mt-2 w-full border-2 border-black/30 bg-white px-3 py-2 font-mono text-sm outline-none transition-colors focus:border-black"
+                >
+                  {HOUSE_VOICES.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.label} — {voice.note}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={`set-${f.key}`}
+                  type={f.secret ? "password" : "text"}
+                  value={s[f.key]}
+                  onChange={(e) => setS({ ...s, [f.key]: e.target.value })}
+                  placeholder={f.placeholder}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="mt-2 w-full border-2 border-black/30 bg-transparent px-3 py-2 font-mono text-sm outline-none transition-colors focus:border-black"
+                />
+              )}
               <p className="mt-1.5 text-[0.7rem] text-black/50">{f.hint}</p>
             </div>
           ))}
