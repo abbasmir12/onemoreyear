@@ -1,65 +1,106 @@
-# One More Year
+<div align="center">
 
-**An open-source documentary studio for the thing you cannot quit.** You give it fragments — voice notes, photographs, the things you only say at 2 a.m. Gemini directs the cut. ElevenLabs performs it with a deliberately limited house cast.
+# ᴏɴᴇ ᴍᴏʀᴇ ʏᴇᴀʀ
 
-Built for the [DEV Weekend Challenge: Passion Edition](https://dev.to) (July 10–13, 2026).
+**An open-source documentary studio for the thing you cannot quit.**
 
-## What it is
+*Built for the [DEV Weekend Challenge: Passion Edition](https://dev.to) — July 10–13, 2026*
 
-One More Year transforms a person's passion journey into a living cinematic memory:
+</div>
 
-1. **Fragments** — you don't write your story; you empty your pockets. Voice notes, photos, half-sentences, in any order.
-2. **The AI Director** — Gemini reads the fragments, finds the arc you couldn't see from inside it, writes the script, designs one visual world, and decides where the silence goes.
-3. **Voice & Score** — ElevenLabs gives the story a narrator, the atmosphere (rain on an empty pitch, a hallway's hum, sixty thousand people standing), and the score.
-4. **The film** — a real, generated documentary: multiple cast voices, sound effects, an original score, and frames, cut and mixed into a downloadable mp4.
+<br>
 
-The featured demo, **Danny Moreau, №9**, is a real output of this pipeline — not a mockup.
+<img src="docs/hero.png" alt="One More Year — Everyone has one thing they can't quit." width="100%">
 
-## Open-source studio
+<br>
 
-One More Year is designed as an inspectable creative studio, not a closed generation service. The interview, director prompt, cast assignment, Gemini calls, procedural fallback art, and browser-side FFmpeg print desk all live in this repository. Bring-your-own-key mode keeps the prototype deployable without operating a paid proxy, while the featured edition remains the judge-safe path.
+> Everyone has one thing they can't quit.
+>
+> Most tools would ask you to write it down. This one asks you to say it out loud — then hands it to a director, a cast, a sound desk, and a print desk, and gets you back a real short film.
 
-The ElevenLabs cast is intentionally constrained to eleven project-curated voice IDs in `lib/voices.ts`. The first is the default deep narrator; two are explicitly identified as female voices by the collection owner. We do not infer identity or demographic labels for the others. The allowlist is enforced immediately before every TTS request, so changing localStorage cannot silently select an unapproved voice. Voice cloning is not part of this project.
+## What it actually does
 
-## Status: working prototype with live AI integrations
+You answer four questions. Nothing technical — just *what's the thing you can't quit, when did it almost end, why did you stay,* and *one line only you would say.* That's the entire brief.
 
-The **Studio** — the "Start your story" flow — runs for real when you connect keys:
+From there, a real production pipeline runs — not a template filled in, not a single flat voice reading a script. An AI director reads what you gave it, decides what the story actually is, and hands it to a small cast, a foley desk, and a composer. What comes out the other end is a short documentary: multiple performed voices, sound effects chosen scene by scene, an original score, and real frames — mixed and printed into an mp4, entirely in your browser.
 
-- **⚙ The Press Room** stores your Gemini director key locally for this open-source prototype. The paid ElevenLabs key must be configured server-side as `ELEVENLABS_API_KEY`; it is never exposed to browser JavaScript.
-- **Gemini — the director** (`generateContent` with JSON structured output, default `gemini-2.5-flash`) reads your four interview answers and writes the full production plan live: headline, audio-tagged script, and prompts for the image, sound-effects, and music desks (`lib/generate.ts`).
-- **The picture desk** can draw with Gemini, use uploaded images, or fetch real free-to-use photography through AssetPipe. AssetPipe follows its documented `GET /search` → select a landscape result → `POST /fetch` → stable `/asset` URL flow. If AI image generation fails, the print desk automatically tries AssetPipe before procedural house art.
-- **ElevenLabs — the voice, foley & score desks**: `eleven_v3` ensemble narration with inline performance tags, three timed Sound Effects v2 regions, and an AI-selected Music v2 mode. Sound is structured as opening world, private/rupture detail, and return/release—not one ambience loop. Crowd or cheering is only generated when the supplied story establishes an audience.
-- **ffmpeg.wasm — the print desk**: mixes narration, score, and room tone and prints frame + audio into a downloadable mp4, entirely in your browser (`lib/assemble.ts`; core served from `public/ffmpeg/`).
+The featured example below, **Danny Moreau, №9**, is a real output of this exact pipeline. Not a mockup, not a storyboard — press play.
 
-The Studio requires a Gemini key to begin and a server-side ElevenLabs key to print. Before generation it checks the subscription endpoint and shows the tier and remaining credit balance. Successful TTS, sound, and music responses are cached in IndexedDB by a content hash, so retrying the final mix or refreshing does not purchase identical assets again.
+<br>
 
-The fixed paid-run budget uses four or five cast voices, eight to ten short TTS segments, five to seven sound-effect regions, and one Music v2 production. Gemini chooses `instrumental`, `vocal`, or `hybrid` and records its rationale; every film is scored — if the model still returns "none," the app coerces it to a sparse instrumental score rather than skip music. Extra voices are clearly symbolic editorial perspectives—not invented witnesses—and may not add biographical facts.
+<img src="docs/wire.png" alt="Danny Moreau, №9 — a real generated documentary, playing in the browser" width="100%">
 
-Every scene carries a director-selected transition: `direct`, `sound`, or `silence`. The opening must establish place with a 4–5 second generated effect before speech; Gemini selects four to six additional 3–5 second sound bridges (five to seven total), while other voices cut directly together. Music has an independent 2–8 second entry cue. Effects are generated as focused, non-looping takes and placed before the associated voice rather than merely layered beneath it.
+<br>
 
-Copy `.env.example` to `.env.local` and add the key after subscribing:
+## The five desks
 
-```bash
-ELEVENLABS_API_KEY=your_key_here
-```
+Every film goes through the same production line a real documentary would — we just compressed the crew into five automated desks.
 
-### Human speech direction
+| Desk | What it does | Powered by |
+|---|---|---|
+| **01 · The Interview** | Four questions. No writing required. | — |
+| **02 · The Director** | Reads your answers, finds the actual arc, writes a full script — casting a narrator, you, and one or two symbolic voices (memory, doubt) pulled from inside the story itself | Gemini, structured JSON output |
+| **03 · The Cast** | Every voice is performed, not read aloud — hesitations, corrections, a line that genuinely breaks where it should | ElevenLabs · `eleven_v3` |
+| **04 · Sound & Score** | Decides what a scene needs — a stadium, a stairwell, rain — generates that effect, then composes an original, restrained score for the piece | ElevenLabs · Sound Effects + Music v2 |
+| **05 · The Print** | Mixes every voice, effect, and cue against the frames and encodes a real mp4 | **ffmpeg.wasm**, running client-side |
 
-The director produces two versions of every spoken beat: a clean `text` transcript for the interface and a `performance` string written specifically for Eleven v3. Performance copy may contain a sparse, emotionally motivated repetition, false start, self-correction, filler, or mid-line audio tag. Most lines remain clean so the imperfect moments carry meaning. Ellipses and em dashes shape v3 pacing; SSML breaks and literal `[pause]` tags are forbidden. Narration uses Eleven v3's Natural stability baseline to balance tag responsiveness with reliability.
+Nothing above is simulated. Every desk makes a real API call and the result is inspectable — this is meant to be read, not just demoed.
 
-## Run it
+## The print desk, specifically
+
+This is the part worth pointing at directly: the final assembly — timing every voice line, layering sound effects at the right offsets, ducking music under dialogue, encoding the whole thing into H.264 — happens with **ffmpeg compiled to WebAssembly, running in the tab that's open right now.** There is no render server. Nothing gets uploaded anywhere to become a video; the browser does the actual video engineering, and you get a downloadable file at the end of it.
+
+`lib/assemble.ts` builds the filter graph (concat, amix, adelay, volume ducking) and hands it to `ffmpeg.wasm`; the core binary ships from `public/ffmpeg/` so it works offline once loaded.
+
+## How the director actually directs
+
+The director doesn't summarize your answers — it's told, explicitly, to find the arc: the turn, the doubt, the reason you stayed. It writes two versions of every line: a clean transcript for the interface, and a separate `performance` string written specifically for Eleven v3 — sparse, motivated imperfections only (a repeated word, a false start, a line that catches), so the emotional beats land instead of the whole thing sounding performed.
+
+Every scene also carries a director-chosen **transition** — `direct`, `sound`, or `silence` — so voices sometimes cut straight into each other and sometimes open on rain, a locker room, a stadium roar. The opening always earns its place with a real generated sound bed before anyone speaks. And every film gets a score: the director can choose instrumental, vocal, or hybrid, but never silence — a story built around restraint still gets a sparse, deliberate score rather than nothing at all.
+
+## Try it yourself
+
+The Studio — the "Start your story" flow — runs for real the moment you connect a key:
+
+- **⚙ The Press Room** stores your **Gemini** key locally in your browser. Get one free at [aistudio.google.com](https://aistudio.google.com).
+- The **ElevenLabs** key is server-side only, in `ELEVENLABS_API_KEY` — it never touches browser JavaScript. Before every run the app checks your subscription tier and remaining credits, and caches successful TTS/SFX/music responses by content hash in IndexedDB, so re-mixing or refreshing never re-purchases identical audio.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Headphones recommended.
+Open **http://localhost:3000**, click **⚙ press room**, drop in your keys, and press **▶ Start your story**. Headphones recommended.
+
+```bash
+# .env — server-side only, never sent to the browser
+ELEVENLABS_API_KEY=your_key_here
+```
+
+## The house cast
+
+Voices are drawn from a small, project-curated allowlist in `lib/voices.ts` — not the full ElevenLabs library, and not voice cloning. The allowlist is enforced immediately before every TTS request, so nothing outside it can be selected even by editing local storage directly.
+
+## Open-source by design
+
+Nothing here is a black box. The interview, the director's prompt, cast assignment, every Gemini and ElevenLabs call, the procedural fallback art, and the browser-side print desk all live in this repository — inspect any of it in `lib/`. Bring-your-own-key mode means the whole prototype runs without anyone operating a paid proxy on your behalf.
 
 ## Stack
 
-Next.js (App Router) · TypeScript · Tailwind CSS v4 · ffmpeg.wasm · Anton + IBM Plex Mono + Caveat
+Next.js (App Router) · TypeScript · Tailwind CSS v4 · **ffmpeg.wasm** · Gemini API · ElevenLabs API · Anton + IBM Plex Mono + Caveat
+
+## Built for two prize categories
+
+This submission integrates both **Google AI** (Gemini directs every story: structured JSON output, image generation, the entire creative arc) and **ElevenLabs** (every voice, every sound effect, and every score is generated live through `eleven_v3`, Sound Effects, and Music v2) — genuinely, not as a checkbox integration.
 
 ## Challenge notes
 
-All code in this repository was started and completed within the challenge window (July 10–13, 2026).
+All code in this repository was started and completed within the [DEV Weekend Challenge](https://dev.to) window (July 10–13, 2026).
+
+<br>
+
+<div align="center">
+
+*Directed by Gemini. Performed by ElevenLabs. Printed by you.*
+
+</div>
