@@ -23,7 +23,7 @@ The featured Danny Moreau story is mocked content (script in `lib/story.ts`, Web
 - **Gemini** (`generateContent` with JSON structured output, default `gemini-2.5-flash`) reads your four interview answers and writes your story live — headline plus an audio-tagged script (`lib/generate.ts`).
 - **ElevenLabs** (`eleven_v3` with [audio tags], any voice from your library) speaks the finished proof aloud from the same screen.
 
-Without keys, the Studio runs an honest simulation of the same pipeline, labeled as such.
+The Studio requires a Gemini key to begin — without one it opens on a setup gate that walks you through connecting the crew. There is no canned output: every story it produces is written live.
 
 ## Run it
 

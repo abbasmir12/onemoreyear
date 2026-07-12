@@ -7,7 +7,7 @@ import SettingsPanel from "./Settings";
 import { loadSettings, type Settings } from "@/lib/settings";
 import { generateStory, synthesize, type GeneratedStory } from "@/lib/generate";
 
-type Phase = "interview" | "agent" | "proof";
+type Phase = "gate" | "interview" | "agent" | "proof";
 type VoiceState = "idle" | "loading" | "playing" | "error";
 
 const QUESTIONS = [
@@ -29,42 +29,34 @@ const QUESTIONS = [
   },
 ];
 
-/** the agent run, step by step — the real pipeline this prototype mocks */
+/** the agent run, step by step */
 const STEPS = [
   {
-    call: "POST /interactions · model: gemini-3-pro",
+    call: "POST generateContent",
     out: "reading your 4 fragments — the dates, the doubt, the things said sideways…",
   },
   {
     call: "structured output · response_schema: story_arc.json",
-    out: `{ "chapters": 6, "turn": "the year it almost ended", "ending": "hope" }`,
+    out: "finding the arc you couldn't see from inside it…",
   },
   {
-    call: "managed agent · shot list → gemini-3-pro-image-preview",
-    out: "6 frames queued · black & white · halftone · one visual world",
+    call: "casting the headline",
+    out: "naming the thing you love, in four words or fewer…",
   },
   {
-    call: "voice casting → eleven_v3 (alpha)",
-    out: "narrator chosen: low, worn, warm — a voice like rain on a tin roof",
-  },
-  {
-    call: "text_to_dialogue · audio tags",
-    out: "[quiet] [rain] [crowd swells] [long pause] [almost a whisper]",
+    call: "voice direction · eleven_v3 audio tags",
+    out: "[quiet] [warmer] [steady] [almost a whisper] [long pause]",
   },
   {
     call: "silence map",
     out: "deciding where the silence goes…",
-  },
-  {
-    call: "render",
-    out: "stitching picture, narration, score. cutting the ending. keeping the hope.",
   },
 ];
 
 const STEP_MS = 1400;
 
 export default function Studio({ onClose }: { onClose: () => void }) {
-  const [phase, setPhase] = useState<Phase>("interview");
+  const [phase, setPhase] = useState<Phase>("gate");
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -73,7 +65,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [story, setStory] = useState<GeneratedStory | null>(null);
-  const [genState, setGenState] = useState<"idle" | "pending" | "done" | "error">("idle");
+  const [genState, setGenState] = useState<"pending" | "done" | "error">("pending");
   const [genError, setGenError] = useState("");
   const [voice, setVoice] = useState<VoiceState>("idle");
   const [voiceError, setVoiceError] = useState("");
@@ -84,8 +76,13 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     setSettings(loadSettings());
   }, [settingsOpen]);
 
-  const live = !!settings?.geminiKey;
+  const ready = !!settings?.geminiKey;
   const hasVoice = !!settings?.elevenKey;
+
+  // the studio opens on the gate until the director is connected
+  useEffect(() => {
+    if (phase === "gate" && ready) setPhase("interview");
+  }, [phase, ready]);
 
   useEffect(
     () => () => {
@@ -107,47 +104,44 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     if (phase === "interview") inputRef.current?.focus();
   }, [phase, qi]);
 
-  // esc closes (theater handles its own esc first)
+  // esc closes (theater and settings handle their own esc first)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !theater) onClose();
+      if (e.key === "Escape" && !theater && !settingsOpen) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, theater]);
+  }, [onClose, theater, settingsOpen]);
 
-  // agent steps advance on a clock; with a live key we also wait for Gemini
+  // agent steps advance on a clock; the proof waits for the director
   useEffect(() => {
     if (phase !== "agent") return;
     if (step >= STEPS.length) {
-      if (live && genState === "pending") return; // hold the last frame until the director answers
+      if (genState !== "done") return; // pending: hold · error: shown in console
       const id = setTimeout(() => setPhase("proof"), 900);
       return () => clearTimeout(id);
     }
     const id = setTimeout(() => setStep((s) => s + 1), STEP_MS);
     return () => clearTimeout(id);
-  }, [phase, step, live, genState]);
+  }, [phase, step, genState]);
 
   const startAgent = useCallback(
     (finalAnswers: string[]) => {
+      if (!settings?.geminiKey) return;
       setPhase("agent");
       setStep(0);
       setStory(null);
       setGenError("");
-      if (settings?.geminiKey) {
-        setGenState("pending");
-        generateStory(finalAnswers, settings)
-          .then((s) => {
-            setStory(s);
-            setGenState("done");
-          })
-          .catch((e) => {
-            setGenError(e instanceof Error ? e.message : String(e));
-            setGenState("error");
-          });
-      } else {
-        setGenState("idle");
-      }
+      setGenState("pending");
+      generateStory(finalAnswers, settings)
+        .then((s) => {
+          setStory(s);
+          setGenState("done");
+        })
+        .catch((e) => {
+          setGenError(e instanceof Error ? e.message : String(e));
+          setGenState("error");
+        });
     },
     [settings]
   );
@@ -165,7 +159,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
   );
 
   const hear = useCallback(async () => {
-    if (!settings?.elevenKey) return;
+    if (!settings?.elevenKey || !story) return;
     if (voice === "playing") {
       audioRef.current?.pause();
       setVoice("idle");
@@ -174,10 +168,10 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     setVoice("loading");
     setVoiceError("");
     try {
-      const lines = story
-        ? story.lines.map((l) => `${l.tag} ${l.text}`)
-        : [`[quiet] ${"It almost ended. It didn't."}`];
-      const url = await synthesize(lines.join("\n"), settings);
+      const url = await synthesize(
+        story.lines.map((l) => `${l.tag} ${l.text}`).join("\n"),
+        settings
+      );
       audioRef.current?.pause();
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -200,24 +194,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
     [answers]
   );
 
-  const headlineOf = (story?.headline || answers[0] || "the thing you love").toUpperCase();
-  const scriptLines: { tag: string; text: string; em?: boolean }[] = story
-    ? story.lines
-    : [
-        {
-          tag: "[quiet]",
-          text: answers[1] ? `It almost ended — ${answers[1]}.` : "It almost ended. It didn't.",
-        },
-        {
-          tag: "[warmer]",
-          text: answers[2] ? `You stayed. ${answers[2]}` : "You stayed, and you know why.",
-        },
-        {
-          tag: "[almost a whisper]",
-          text: `“${answers[3] || "the grass smell before kickoff. that's the whole reason."}”`,
-          em: true,
-        },
-      ];
+  const headlineOf = (story?.headline || "").toUpperCase();
 
   return (
     <div
@@ -228,7 +205,8 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       {/* studio masthead */}
       <div className="sticky top-0 z-10 flex items-center justify-between border-b-4 border-black bg-white px-5 py-3 md:px-10">
         <p className="display text-xl">
-          <span className="outline-text">One</span> More <span className="bg-black px-1.5 text-white">Year</span>
+          <span className="outline-text">One</span> More{" "}
+          <span className="bg-black px-1.5 text-white">Year</span>
           <span className="ml-4 text-base text-black/50">— the studio</span>
         </p>
         <div className="flex items-center gap-2">
@@ -236,7 +214,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
             onClick={() => setSettingsOpen(true)}
             className="px-3 py-2 text-[0.65rem] font-bold uppercase tracking-[0.2em] transition-colors hover:bg-black hover:text-white"
           >
-            ⚙ press room {live ? "· live" : "· simulation"}
+            ⚙ press room{ready ? " · connected" : ""}
           </button>
           <button
             onClick={onClose}
@@ -246,6 +224,54 @@ export default function Studio({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+
+      {/* ——— phase 0 · the gate ——— */}
+      {phase === "gate" && (
+        <div className="flex min-h-[calc(100svh-64px)] flex-col justify-center px-5 py-16 md:px-10">
+          <div className="mx-auto w-full max-w-4xl">
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-black/50">
+              before we begin
+            </p>
+            <h2 className="display mt-6 text-5xl leading-[0.95] sm:text-7xl md:text-8xl">
+              This studio runs
+              <br />
+              <span className="mt-[0.08em] inline-block bg-black px-3 pb-[0.05em] text-white">
+                on real ink.
+              </span>
+            </h2>
+            <p className="mt-8 max-w-lg text-sm leading-relaxed md:text-base">
+              Your story is written live by Gemini and spoken by ElevenLabs — nothing canned.
+              Connect your keys once and they stay in this browser&rsquo;s localStorage. They never
+              touch a server.
+            </p>
+
+            <div className="mt-10 max-w-lg space-y-3 font-mono text-sm">
+              <p className="flex items-center justify-between border-2 border-black px-4 py-3">
+                <span>Gemini API key — writes your story</span>
+                <span className={ready ? "" : "bg-black px-2 py-0.5 text-white"}>
+                  {ready ? "✓ connected" : "required"}
+                </span>
+              </p>
+              <p className="flex items-center justify-between border-2 border-black/40 px-4 py-3">
+                <span>ElevenLabs API key — speaks it</span>
+                <span className={hasVoice ? "" : "text-black/50"}>
+                  {hasVoice ? "✓ connected" : "optional"}
+                </span>
+              </p>
+            </div>
+
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="display mt-10 bg-black px-10 py-4 text-3xl text-white transition-colors hover:bg-white hover:text-black hover:outline hover:outline-4 hover:outline-black"
+            >
+              ⚙ Open the press room
+            </button>
+            <p className="mt-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-black/50">
+              free keys: aistudio.google.com · elevenlabs.io
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ——— phase 1 · the interview ——— */}
       {phase === "interview" && (
@@ -261,7 +287,10 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               />
             </div>
 
-            <h2 key={qi} className="display fade-up mt-12 text-5xl leading-[0.95] sm:text-7xl md:text-8xl">
+            <h2
+              key={qi}
+              className="display fade-up mt-12 text-5xl leading-[0.95] sm:text-7xl md:text-8xl"
+            >
               {QUESTIONS[qi].q}
             </h2>
 
@@ -294,7 +323,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {/* ——— phase 2 · the agent at work ——— */}
+      {/* ——— phase 2 · the director at work ——— */}
       {phase === "agent" && (
         <div className="min-h-[calc(100svh-64px)] bg-black px-5 py-14 text-white md:px-10">
           <div className="mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[1fr_1.6fr]">
@@ -305,7 +334,9 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               <div className="mt-6 space-y-4">
                 {fragments.map((f) => (
                   <div key={f.label} className="border-2 border-white/40 p-4">
-                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/50">{f.label}</p>
+                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/50">
+                      {f.label}
+                    </p>
                     <p className={`hand mt-1 text-2xl leading-tight ${f.real ? "" : "text-white/40"}`}>
                       “{f.text}”
                     </p>
@@ -322,27 +353,48 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 {STEPS.slice(0, Math.min(step + 1, STEPS.length)).map((s, i) => (
                   <div key={i} className={`fade-up ${i > 0 ? "mt-5" : ""}`}>
                     <p className="flex items-baseline gap-3">
-                      <span className={i < step ? "text-white" : "animate-pulse"}>{i < step ? "✓" : "█"}</span>
+                      <span className={i < step ? "text-white" : "animate-pulse"}>
+                        {i < step ? "✓" : "█"}
+                      </span>
                       <span className="text-white/60">{s.call}</span>
                     </p>
                     <p className="mt-1 pl-6 text-base text-white md:text-lg">{s.out}</p>
                   </div>
                 ))}
-                {step >= STEPS.length &&
-                  (live && genState === "pending" ? (
-                    <p className="fade-up mt-6 animate-pulse text-white/80">
-                      █ gemini is writing — waiting for the director…
+                {step >= STEPS.length && genState === "pending" && (
+                  <p className="fade-up mt-6 animate-pulse text-white/80">
+                    █ gemini is writing — waiting for the director…
+                  </p>
+                )}
+                {step >= STEPS.length && genState === "done" && (
+                  <p className="fade-up mt-6 bg-white px-2 py-1 font-bold text-black">
+                    ✓ first proof ready — sending it to press…
+                  </p>
+                )}
+                {step >= STEPS.length && genState === "error" && (
+                  <div className="fade-up mt-6">
+                    <p className="border-2 border-white bg-white px-3 py-2 font-bold text-black">
+                      the director didn&rsquo;t answer — {genError}
                     </p>
-                  ) : (
-                    <p className="fade-up mt-6 bg-white px-2 py-1 font-bold text-black">
-                      ✓ first proof ready — sending it to press…
-                    </p>
-                  ))}
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        onClick={() => startAgent(answers)}
+                        className="display border-2 border-white px-5 py-2 text-xl transition-colors hover:bg-white hover:text-black"
+                      >
+                        ↻ Try again
+                      </button>
+                      <button
+                        onClick={() => setSettingsOpen(true)}
+                        className="display border-2 border-white/50 px-5 py-2 text-xl text-white/70 transition-colors hover:border-white hover:bg-white hover:text-black"
+                      >
+                        ⚙ Check the press room
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <p className="mt-4 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-white/40">
-                {live
-                  ? `live — your story is being written by ${settings?.geminiModel} right now`
-                  : "simulation — connect your keys in the press room (⚙) and this run goes live"}
+                live — your story is being written by {settings?.geminiModel} right now
               </p>
             </div>
           </div>
@@ -350,23 +402,15 @@ export default function Studio({ onClose }: { onClose: () => void }) {
       )}
 
       {/* ——— phase 3 · the first proof ——— */}
-      {phase === "proof" && (
+      {phase === "proof" && story && (
         <div className="px-5 py-14 md:px-10">
           <div className="mx-auto w-full max-w-5xl">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-black/50">
                 your back page · first proof
               </p>
-              <span className="stamp text-xs">
-                {story ? `live · written by ${settings?.geminiModel}` : "simulation"}
-              </span>
+              <span className="stamp text-xs">live · written by {settings?.geminiModel}</span>
             </div>
-            {genState === "error" && (
-              <p className="mt-4 border-2 border-black bg-black px-3 py-2 font-mono text-xs text-white">
-                the director didn&rsquo;t answer ({genError}) — falling back to the template. check
-                your key in the press room (⚙).
-              </p>
-            )}
 
             <h2 className="display mt-8 text-6xl leading-[0.9] sm:text-8xl">
               One more year
@@ -380,7 +424,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
               <div className="border-4 border-black">
                 <MomentArt id="onemore" className="block aspect-[4/3] w-full" />
                 <p className="border-t-4 border-black px-3 py-2 text-[0.6rem] font-bold uppercase tracking-[0.18em]">
-                  frame 6/6 · gemini-3-pro-image-preview · or upload your own
+                  frame 6/6 · gemini image generation — coming to the studio next
                 </p>
               </div>
 
@@ -389,7 +433,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   script proof · {settings?.elevenModel || "eleven_v3"} audio tags
                 </p>
                 <div className="mt-4 space-y-4 font-mono text-base leading-relaxed">
-                  {scriptLines.map((l, i) =>
+                  {story.lines.map((l, i) =>
                     l.em ? (
                       <p key={i} className="bg-black px-2 py-1 font-bold text-white">
                         <span className="opacity-50">{l.tag}</span> {l.text}
@@ -404,7 +448,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <div className="mt-10 flex flex-wrap gap-4">
-                  {hasVoice && (
+                  {hasVoice ? (
                     <button
                       onClick={hear}
                       disabled={voice === "loading"}
@@ -416,14 +460,17 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                           ? "❚❚ Stop"
                           : "▶ Hear it"}
                     </button>
+                  ) : (
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
+                    >
+                      ⚙ Add a voice — ElevenLabs
+                    </button>
                   )}
                   <button
                     onClick={() => setTheater(true)}
-                    className={`display px-6 py-3 text-2xl transition-colors ${
-                      hasVoice
-                        ? "border-4 border-black hover:bg-black hover:text-white"
-                        : "bg-black text-white hover:bg-white hover:text-black hover:outline hover:outline-4 hover:outline-black"
-                    }`}
+                    className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
                   >
                     ⛶ Watch the demo film
                   </button>
@@ -436,7 +483,7 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                       setAnswers([]);
                       setStep(0);
                       setStory(null);
-                      setGenState("idle");
+                      setGenState("pending");
                     }}
                     className="display border-4 border-black px-6 py-3 text-2xl transition-colors hover:bg-black hover:text-white"
                   >
@@ -450,12 +497,10 @@ export default function Studio({ onClose }: { onClose: () => void }) {
                   </p>
                 )}
                 <p className="mt-6 max-w-md text-xs leading-relaxed text-black/60">
-                  {story
-                    ? "This script was written live by Gemini from your answers."
-                    : "This proof is assembled from your words by a template."}{" "}
+                  This script was written live by Gemini from your answers.
                   {hasVoice
-                    ? "Press hear it and ElevenLabs speaks it, audio tags and all."
-                    : "Connect keys in the press room (⚙) and the studio runs for real."}
+                    ? " Press hear it and ElevenLabs speaks it, audio tags and all."
+                    : " Add an ElevenLabs key in the press room to hear it read aloud."}
                 </p>
               </div>
             </div>

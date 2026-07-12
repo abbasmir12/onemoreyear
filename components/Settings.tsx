@@ -84,9 +84,9 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-7 px-6 py-7">
           <p className="text-xs leading-relaxed text-black/70">
-            Connect your own keys and the studio runs for real: Gemini writes your story, ElevenLabs
-            speaks it. Keys are stored in <b>this browser&rsquo;s localStorage only</b> — they never
-            touch a server. Leave them empty to keep the simulation.
+            The studio runs on your own keys: Gemini writes your story, ElevenLabs speaks it. A
+            Gemini key is required to begin; ElevenLabs is optional (it adds the voice). Keys are
+            stored in <b>this browser&rsquo;s localStorage only</b> — they never touch a server.
           </p>
 
           {FIELDS.map((f) => (
