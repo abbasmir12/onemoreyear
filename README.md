@@ -87,20 +87,12 @@ Nothing here is a black box. The interview, the director's prompt, cast assignme
 
 ## Stack
 
-Next.js (App Router) · TypeScript · Tailwind CSS v4 · **ffmpeg.wasm** · Gemini API · ElevenLabs API · Anton + IBM Plex Mono + Caveat
-
-## Built for two prize categories
-
-This submission integrates both **Google AI** (Gemini directs every story: structured JSON output, image generation, the entire creative arc) and **ElevenLabs** (every voice, every sound effect, and every score is generated live through `eleven_v3`, Sound Effects, and Music v2) — genuinely, not as a checkbox integration.
-
-## Challenge notes
-
-All code in this repository was started and completed within the [DEV Weekend Challenge](https://dev.to) window (July 10–13, 2026).
-
-<br>
-
-<div align="center">
-
-*Directed by Gemini. Performed by ElevenLabs. Printed by you.*
-
-</div>
+| Layer | Doing what |
+|---|---|
+| **Next.js** · App Router | the studio, the interview, the whole front door |
+| **TypeScript** | every desk, typed end to end |
+| **Tailwind CSS v4** | the black-and-white newspaper look |
+| **Gemini API** | the director — structured JSON output, image generation |
+| **ElevenLabs API** | the cast — `eleven_v3`, Sound Effects, Music v2 |
+| **ffmpeg.wasm** | the print desk — real video encoding, client-side |
+| Anton · IBM Plex Mono · Caveat | the type — headlines, wire copy, handwriting |
